@@ -1,0 +1,166 @@
+IsJsInjected = true;
+console.log('Code is injected!');
+
+var mouse_x, mouse_y; 
+
+document.onmousemove=(e)=>{mouse_x=e.pageX;mouse_y=e.pageY;console.log(mouse_x);console.log(mouse_y)}
+
+
+function add_element() {
+    console.log("onload");
+    var cursorObj = document.createElement("canvas");
+    cursorObj.id  = 'cursor';
+    cursorObj.width = 10;
+    cursorObj.height = 10;
+    var context = cursorObj.getContext("2d");
+    context.beginPath();
+    context.arc(5, 5, 5, 0, 2 * Math.PI, false);
+    context.fillStyle = 'red';
+    context.fill();
+    context.lineWidth = 1;
+    cursorObj.style.position = 'absolute';
+	cursorObj.style["z-index"] = 10000;
+    document.body.appendChild(cursorObj);
+	
+	/*
+	var clickedObj = document.createElement("canvas");
+    clickedObj.id  = 'clicked';
+    clickedObj.width = 16;
+    clickedObj.height = 16;
+    context = clickedObj.getContext("2d");
+    context.beginPath();
+    context.arc(8, 8, 8, 0, 2 * Math.PI, false);
+    context.fillStyle = 'yellow';
+    context.fill();
+    context.lineWidth = 1;
+    clickedObj.style.position = 'absolute';
+	clickedObj.style["z-index"] = 10000;
+    document.body.appendChild(clickedObj);
+	
+	
+	var clickedBetObj = document.createElement("canvas");
+    clickedBetObj.id  = 'clicked';
+    clickedBetObj.width = 200;
+    clickedBetObj.height = 60;
+    context = clickedBetObj.getContext("2d");
+    context.beginPath();
+    context.rect(0, 0, 200, 60);
+    context.fillStyle = 'yellow';
+    context.fill();
+    context.lineWidth = 1;
+    clickedBetObj.style.position = 'absolute';
+	clickedBetObj.style["z-index"] = 10000;
+    document.body.appendChild(clickedBetObj);
+	clickedBetObj.style.left = document.body.clientWidth / 2 + "px";
+    clickedBetObj.style.bottom = "5px";
+	*/
+}
+setTimeout(function(){
+	add_element();
+}, 5000);
+
+
+var pointerX = -1;
+var pointerY = -1;
+
+var clickedX = -1;
+var clickedY = -1;
+
+  
+document.onmousemove = function(event) {
+	pointerX = event.pageX;
+	pointerY = event.pageY;
+}
+
+document.onclick = function(event) {
+	clickedX = event.pageX;
+	clickedY = event.pageY;
+}
+
+setInterval(pointerCheck, 10);
+  
+function pointerCheck() {
+  try{
+    document.getElementById("cursor").style.left = (pointerX + 24)  + "px";
+    document.getElementById("cursor").style.top = (pointerY+ 24) + "px";
+	
+	//document.getElementById("clicked").style.left = clickedX + "px";
+    //document.getElementById("clicked").style.top = clickedY+ "px";
+	
+  }catch{
+  }
+}
+ var latitude = 0;
+ var longitude = 0;
+ function getLocation() {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(showPosition);
+    } 
+  }
+  
+  function showPosition(position) {
+    latitude = position.coords.latitude ;
+    longitude = position.coords.longitude;
+  }
+
+async function getCurrentLocation() {
+    return await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        function(position) {
+          var latitude = position.coords.latitude;
+          var longitude = position.coords.longitude;
+          resolve(JSON.stringify({latitude, longitude}));
+        },
+        function(error) {
+          reject(error);
+        }
+      );
+    });
+  }
+async function getXcft() {
+    return await new Promise((resolve) => {
+        const counter = ns_gen5_net.Loader.Counter++;
+        const listener = (callback) => {
+            window.removeEventListener(`xcft${counter}`, listener);
+            resolve(callback.detail);
+        };
+        window.addEventListener(`xcft${counter}`, listener);
+        window.dispatchEvent(new CustomEvent('xcftr', { detail: counter }));
+    });
+}
+
+function getRandToken(e){
+	return crypto.getRandomValues(new Uint8Array(e)).reduce(( (e, t) => e += (t &= 63) < 36 ? t.toString(36) : t < 62 ? (t - 26).toString(36).toUpperCase() : t > 62 ? "-" : "_"), "");
+}
+
+function PostRequest(postParams , url , auth_token = ''){
+    var method = "POST";
+    var shouldBeAsync = true;
+    const request = new XMLHttpRequest();
+
+    request.onload = function () {
+      var status = request.status;
+      var data = request.responseText;
+    }
+    request.open(method, url, shouldBeAsync);
+    request.setRequestHeader("Content-Type", "application/json");
+    request.setRequestHeader( 'Access-Control-Allow-Origin', '*');
+    if(auth_token != '')
+        request.setRequestHeader( 'Authorization', 'Bearer '+ auth_token);
+
+    request.send(postParams);
+}
+
+function GetRequest(url){
+    var method = "GET";
+    var shouldBeAsync = true;
+    const request = new XMLHttpRequest();
+    request.onload = function () {
+      var status = request.status;
+      var data = request.responseText;
+    }
+    request.open(method, url, shouldBeAsync);
+    request.setRequestHeader( 'Access-Control-Allow-Origin', '*');
+    request.send();
+}
+

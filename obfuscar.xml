@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  KingTigerBet 봇 난독화 설정 (Obfuscar).
+  범위: PragmaticBot.Services.* (핵심 베팅 로직)의 타입·메서드·필드 이름을 난독화한다.
+  보존(이름 변경 금지):
+    - 모든 속성/이벤트 이름  → System.Text.Json(익명 타입·DTO record)·데이터바인딩이 속성명을 그대로 씀.
+    - PragmaticBot.Models.*   → 서버와 주고받는 DTO/상태/enum. 직렬화 계약이라 절대 건드리면 안 됨.
+    - PragmaticBot(루트)      → WinForms 폼/Program(진입점). Designer/이벤트 배선 안전.
+  Release + -p:Obfuscate=true 로 퍼블리시할 때만 csproj 타깃이 이 파일을 실행한다.
+-->
+<Obfuscator>
+  <Var name="InPath" value="bin\Release\net10.0-windows\win-x64" />
+  <Var name="OutPath" value="obf_out" />
+
+  <Var name="KeepPublicApi" value="false" />
+  <Var name="HidePrivateApi" value="true" />
+  <Var name="RenameProperties" value="false" />
+  <Var name="RenameEvents" value="false" />
+  <Var name="RenameFields" value="true" />
+  <Var name="ReuseNames" value="true" />
+  <Var name="UseUnicodeNames" value="false" />
+  <Var name="HideStrings" value="false" />
+  <Var name="OptimizeMethods" value="true" />
+  <Var name="SuppressIldasm" value="true" />
+
+  <AssemblySearchPath path="bin\Release\net10.0-windows\win-x64" />
+
+  <Module file="$(InPath)\PragmaticBot.dll">
+    <!-- 루트 네임스페이스(폼/Program) 통째로 보존 -->
+    <SkipNamespace name="PragmaticBot" />
+    <!-- Models 및 그 하위(Models.Api 등) 통째로 보존 -->
+    <SkipNamespace name="PragmaticBot\.Models.*" rx="true" />
+  </Module>
+</Obfuscator>
