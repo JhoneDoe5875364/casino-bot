@@ -796,6 +796,7 @@ public class PragmaticAutoBettingService
 		try
 		{
 			Context.UserId = userId;
+			_startBetAmountCache = new Dictionary<int, List<BetAmountSettingDto>>();
 			SecondLogicSetting slSetting = new SecondLogicSettingService().Get(userId);
 			if (slSetting.IsEnabled)
 			{
@@ -830,7 +831,14 @@ public class PragmaticAutoBettingService
 				_slCooldownMinutes = 0;
 			}
 			Context.IsChainMode = betAmountType == -1;
-			await LoadFormatSettingsAsync(userId);
+			// [성능] 서로 독립적인 설정들(각기 다른 Context 필드만 갱신)을 동시에 로드한다.
+			//        원격 VPS에서 한 건당 ~0.3초 걸리던 순차 왕복을 겹쳐 처리해 게임 시작을 크게 단축한다.
+			Task formatTask = LoadFormatSettingsAsync(userId);
+			Task limitTask = LoadLimitSettingsAsync(userId);
+			Task exceptionTask = LoadExceptionFormatSettingsAsync(userId);
+			Task roomGateTask = LoadRoomGateFormatSettingsAsync(userId);
+			Task<RoomCooldownSettings> cooldownTask = LoadRoomCooldownSettingsAsync();
+			await formatTask;
 			if (Context.Patterns.Count == 0 && !Context.IsPbCrossEnabled)
 			{
 				RaiseStateChanged(isRunning: false, "서식 설정이 없습니다.");
@@ -867,9 +875,7 @@ public class PragmaticAutoBettingService
 					FileLogger.Log($"[세컨로직] 조합 단위(마틴 1단계) = {_slComboUnit:N0}원");
 				}
 			}
-			await LoadLimitSettingsAsync(userId);
-			await LoadExceptionFormatSettingsAsync(userId);
-			await LoadRoomGateFormatSettingsAsync(userId);
+			await Task.WhenAll(limitTask, exceptionTask, roomGateTask);
 			Context.PendingBetAmount = 0m;
 			if (Context.CurrentBalance <= 0m)
 			{
@@ -908,7 +914,7 @@ public class PragmaticAutoBettingService
 			StartInactivityTimer();
 			Context.ResetKeepAliveStats();
 			StartKeepAliveTimer();
-			RoomCooldownSettings cooldownSettings = await LoadRoomCooldownSettingsAsync();
+			RoomCooldownSettings cooldownSettings = await cooldownTask;
 			_cooldownService.Start(userId, cooldownSettings);
 			RaiseStateChanged(isRunning: true, "자동 베팅 시작됨" + (Context.IsChainMode ? $" (체인 {Context.ChainSteps.Count}단계)" : ""));
 			FileLogger.Log($"[AutoBetting] 자동 베팅 시작 - 패턴 {Context.Patterns.Count}개, 베팅금 {Context.BetAmounts.Count}단계" + (Context.IsChainMode ? $", 체인={Context.ChainSteps.Count}단계" : "") + (Context.IsPbCrossEnabled ? ", PB교차베팅 ON(서식 매칭 없이 매 라운드 P/B 교차)" : "") + ((Context.IsPbCrossEnabled && Context.IsBpCrossOnTwoLossEnabled) ? $", 2연패시BP교차 ON({2}연패마다 PB↔BP 위상 전환)" : ""));
@@ -917,6 +923,10 @@ public class PragmaticAutoBettingService
 		{
 			FileLogger.Log("[AutoBetting] 시작 실패: " + ex.Message, "Error", "AutoBetting", ex.StackTrace);
 			RaiseStateChanged(isRunning: false, "시작 실패: " + ex.Message);
+		}
+		finally
+		{
+			_startBetAmountCache = null;
 		}
 	}
 
@@ -4294,9 +4304,28 @@ public class PragmaticAutoBettingService
 		}
 	}
 
+	// [성능] 한 번의 게임 시작(StartAsync) 동안 같은 베팅금 타입을 여러 번 조회하던 중복 서버 왕복을 없애기 위한 캐시.
+	// StartAsync 시작 시 새로 만들고 끝나면(finally) 비운다 → 세션 간에는 항상 새로 받으므로 설정 변경이 즉시 반영된다.
+	private Dictionary<int, List<BetAmountSettingDto>>? _startBetAmountCache;
+
+	private async Task<List<BetAmountSettingDto>> GetBetAmountsForStartAsync(int betAmountType = 0)
+	{
+		Dictionary<int, List<BetAmountSettingDto>>? cache = _startBetAmountCache;
+		if (cache != null && cache.TryGetValue(betAmountType, out List<BetAmountSettingDto>? cached))
+		{
+			return cached;
+		}
+		List<BetAmountSettingDto> list = await GetApi().GetBetAmountsAsync(betAmountType);
+		if (cache != null)
+		{
+			cache[betAmountType] = list;
+		}
+		return list;
+	}
+
 	private async Task LoadBetAmountSettingsAsync(string userId, int betAmountType)
 	{
-		List<BetAmountSettingDto> amounts = await GetApi().GetBetAmountsAsync(betAmountType);
+		List<BetAmountSettingDto> amounts = await GetBetAmountsForStartAsync(betAmountType);
 		Context.HongKongWinTargetSteps.Clear();
 		switch (betAmountType)
 		{
@@ -4364,7 +4393,7 @@ public class PragmaticAutoBettingService
 				break;
 			}
 			context3.MartinMaxStep = martinMaxStep;
-			BetAmountSettingDto dalembertBaseEntry2 = (await GetApi().GetBetAmountsAsync(4)).FirstOrDefault(delegate(BetAmountSettingDto b)
+			BetAmountSettingDto dalembertBaseEntry2 = (await GetBetAmountsForStartAsync(4)).FirstOrDefault(delegate(BetAmountSettingDto b)
 			{
 				if (b.Number == 1 && b.Amount.HasValue)
 				{
@@ -4374,7 +4403,7 @@ public class PragmaticAutoBettingService
 				return false;
 			});
 			Context.DAlembertBaseAmount = (dalembertBaseEntry2?.Amount).GetValueOrDefault();
-			Dictionary<int, decimal> allMartinAmounts = (from b in await GetApi().GetBetAmountsAsync()
+			Dictionary<int, decimal> allMartinAmounts = (from b in await GetBetAmountsForStartAsync()
 				where b.Amount.HasValue
 				orderby b.Number
 				select b).ToDictionary((BetAmountSettingDto b) => b.Number, (BetAmountSettingDto b) => b.Amount.Value);
@@ -4606,7 +4635,7 @@ public class PragmaticAutoBettingService
 				context.DalmenzingMaxStep = dalmenzingMaxStep;
 				BetAmountSettingDto methodEntry = amounts.FirstOrDefault((BetAmountSettingDto b) => b.Number == 2);
 				Context.DalmenzingRecoveryMethod = (((object)methodEntry != null && methodEntry.BettingMethod == 1) ? 1 : 0);
-				BetAmountSettingDto dalembertBaseEntry = (await GetApi().GetBetAmountsAsync(4)).FirstOrDefault(delegate(BetAmountSettingDto b)
+				BetAmountSettingDto dalembertBaseEntry = (await GetBetAmountsForStartAsync(4)).FirstOrDefault(delegate(BetAmountSettingDto b)
 				{
 					if (b.Number == 1 && b.Amount.HasValue)
 					{
@@ -4616,12 +4645,12 @@ public class PragmaticAutoBettingService
 					return false;
 				});
 				Context.DalmenzingDAlembertBaseAmount = (dalembertBaseEntry?.Amount).GetValueOrDefault();
-				List<BetAmountSettingDto> martinAmounts = await GetApi().GetBetAmountsAsync();
+				List<BetAmountSettingDto> martinAmounts = await GetBetAmountsForStartAsync();
 				Context.DalmenzingMartinAmounts = (from b in martinAmounts
 					where b.Amount.HasValue
 					orderby b.Number
 					select b).ToDictionary((BetAmountSettingDto b) => b.Number, (BetAmountSettingDto b) => b.Amount.Value);
-				List<BetAmountSettingDto> hongKongAmounts = await GetApi().GetBetAmountsAsync(1);
+				List<BetAmountSettingDto> hongKongAmounts = await GetBetAmountsForStartAsync(1);
 				Context.DalmenzingHongKongAmounts = (from b in hongKongAmounts
 					where b.Amount.HasValue
 					orderby b.Number
@@ -4637,8 +4666,8 @@ public class PragmaticAutoBettingService
 			if (betAmountType == 3)
 			{
 				Context.StepBettingMethods = amounts.Where((BetAmountSettingDto b) => b.Amount.HasValue).ToDictionary((BetAmountSettingDto b) => b.Number, (BetAmountSettingDto b) => b.BettingMethod.GetValueOrDefault());
-				List<BetAmountSettingDto> martinEntries = await GetApi().GetBetAmountsAsync();
-				List<BetAmountSettingDto> hongkongEntries = await GetApi().GetBetAmountsAsync(1);
+				List<BetAmountSettingDto> martinEntries = await GetBetAmountsForStartAsync();
+				List<BetAmountSettingDto> hongkongEntries = await GetBetAmountsForStartAsync(1);
 				Context.MartinBetAmounts = martinEntries.Where((BetAmountSettingDto b) => b.Amount.HasValue).ToDictionary((BetAmountSettingDto b) => b.Number, (BetAmountSettingDto b) => b.Amount.Value);
 				Context.HongKongBetAmounts = hongkongEntries.Where((BetAmountSettingDto b) => b.Amount.HasValue).ToDictionary((BetAmountSettingDto b) => b.Number, (BetAmountSettingDto b) => b.Amount.Value);
 				ApplyHongKongWinTargetSteps(hongkongEntries);
@@ -4745,7 +4774,7 @@ public class PragmaticAutoBettingService
 		Context.AllChainContexts = new Dictionary<int, StrategyContextSnapshot>();
 		foreach (int strategyType in uniqueTypes)
 		{
-			var (betAmounts, snapshot) = BuildStrategyData(strategyType, await GetApi().GetBetAmountsAsync(strategyType));
+			var (betAmounts, snapshot) = BuildStrategyData(strategyType, await GetBetAmountsForStartAsync(strategyType));
 			Context.AllChainBetAmounts[strategyType] = betAmounts;
 			Context.AllChainContexts[strategyType] = snapshot;
 		}
@@ -4753,7 +4782,13 @@ public class PragmaticAutoBettingService
 		Context.SelectedBetAmountType = firstType;
 		ApplyStrategyFromChain(firstType);
 		FileLogger.Log($"[AutoBetting][체인] 로드 완료: '{chainDto.Name}', {Context.ChainSteps.Count}단계, 완료동작={((chainDto.CompletionAction == 1) ? "순환" : "정지")}, 첫 전략={GetBetAmountTypeName(firstType)}");
-		return Context.BetAmounts.Count > 0;
+		if (Context.BetAmounts.Count == 0)
+		{
+			// 조용한 실패 제거: 체인 첫 전략의 베팅금이 없으면 명확히 알린다.
+			RaiseStateChanged(isRunning: false, $"체인의 첫 전략({GetBetAmountTypeName(firstType)})에 베팅금이 설정되지 않았습니다. '베팅금 설정'에서 해당 전략의 금액을 입력한 뒤 다시 시작하세요.");
+			return false;
+		}
+		return true;
 	}
 
 	private (Dictionary<int, decimal> BetAmounts, StrategyContextSnapshot Snapshot) BuildStrategyData(int strategyType, List<BetAmountSettingDto> amounts)

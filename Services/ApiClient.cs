@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -117,102 +118,262 @@ public class ApiClient : IDisposable
 		});
 	}
 
+	// 서식 — 로컬 우선(있으면 즉시), 없으면 서버에서 받아 로컬에 캐시. 저장은 로컬 즉시 + 서버 반영.
 	public async Task<List<FormatSettingDto>> GetFormatsAsync()
 	{
-		return await GetAsync<List<FormatSettingDto>>("api/settings/formats");
+		string? uid = AuthService.CurrentUserId;
+		List<FormatSettingDto>? local = LocalSettingsStore.GetFormats(uid);
+		if (local != null)
+		{
+			return local;
+		}
+		List<FormatSettingDto> server = await GetAsync<List<FormatSettingDto>>("api/settings/formats");
+		LocalSettingsStore.SetFormats(uid, server);
+		return server;
 	}
 
 	public async Task SaveFormatsAsync(List<FormatSettingDto> formats)
 	{
+		LocalSettingsStore.SetFormats(AuthService.CurrentUserId, formats);
 		await PostAsync("api/settings/formats", formats);
 	}
 
+	// 베팅금(타입별) — 로컬 우선. 저장은 타입별로 로컬 즉시 반영 후 서버 반영.
 	public async Task<List<BetAmountSettingDto>> GetBetAmountsAsync(int betAmountType = 0)
 	{
-		return await GetAsync<List<BetAmountSettingDto>>($"api/settings/bet-amounts?betAmountType={betAmountType}");
+		string? uid = AuthService.CurrentUserId;
+		List<BetAmountSettingDto>? local = LocalSettingsStore.GetBetAmounts(uid, betAmountType);
+		if (local != null)
+		{
+			return local;
+		}
+		List<BetAmountSettingDto> server = await GetAsync<List<BetAmountSettingDto>>($"api/settings/bet-amounts?betAmountType={betAmountType}");
+		LocalSettingsStore.SetBetAmounts(uid, betAmountType, server);
+		return server;
 	}
 
 	public async Task SaveBetAmountsAsync(List<BetAmountSettingDto> betAmounts)
 	{
+		string? uid = AuthService.CurrentUserId;
+		if (uid != null && betAmounts != null)
+		{
+			foreach (IGrouping<int, BetAmountSettingDto> g in betAmounts.GroupBy(b => b.BetAmountType))
+			{
+				LocalSettingsStore.SetBetAmounts(uid, g.Key, g.ToList());
+			}
+		}
 		await PostAsync("api/settings/bet-amounts", betAmounts);
 	}
 
+	/// <summary>
+	/// 로그인 직후 백그라운드로 호출된다. 서버의 서식·베팅금을 당겨 로컬을 덮어써서
+	/// (1) 관리자가 서버에서 바꾼 설정을 반영하고 (2) 설정 화면이 처음부터 로컬(빠름)로 열리게 한다.
+	/// 실패는 조용히 무시 — 로컬이 없으면 각 화면이 그때 서버에서 받아 채운다.
+	/// </summary>
+	public async Task SeedSettingsFromServerAsync()
+	{
+		string? uid = AuthService.CurrentUserId;
+		if (string.IsNullOrEmpty(uid))
+		{
+			return;
+		}
+		try
+		{
+			List<FormatSettingDto> formats = await GetAsync<List<FormatSettingDto>>("api/settings/formats");
+			LocalSettingsStore.SetFormats(uid, formats);
+		}
+		catch
+		{
+		}
+		// 봇이 쓰는 베팅금 타입들(행렬 제외)을 미리 당겨 로컬에 채운다.
+		int[] betTypes = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+		foreach (int t in betTypes)
+		{
+			try
+			{
+				List<BetAmountSettingDto> amounts = await GetAsync<List<BetAmountSettingDto>>($"api/settings/bet-amounts?betAmountType={t}");
+				LocalSettingsStore.SetBetAmounts(uid, t, amounts);
+			}
+			catch
+			{
+			}
+		}
+		// 행렬(11~14) 셀·행규칙도 미리 당겨 로컬에 채운다.
+		int[] matrixTypes = { 11, 12, 13, 14 };
+		foreach (int mt in matrixTypes)
+		{
+			try
+			{
+				List<MatrixCellDto> cells = await GetAsync<List<MatrixCellDto>>($"api/settings/matrix-cells?betAmountType={mt}");
+				LocalSettingsStore.SetMatrixCells(uid, mt, cells);
+			}
+			catch
+			{
+			}
+			try
+			{
+				List<MatrixRowRuleDto> rules = await GetAsync<List<MatrixRowRuleDto>>($"api/settings/matrix-row-rules?betAmountType={mt}");
+				LocalSettingsStore.SetMatrixRowRules(uid, mt, rules);
+			}
+			catch
+			{
+			}
+		}
+		// 예외서식·방게이트·한도·방쿨다운도 로컬에 씨딩.
+		try { LocalSettingsStore.SetExceptionFormats(uid, await GetAsync<List<ExceptionFormatDto>>("api/settings/exception-formats")); } catch { }
+		try { LocalSettingsStore.SetRoomGateFormats(uid, await GetAsync<List<RoomGateFormatDto>>("api/settings/room-gate-formats")); } catch { }
+		try { LocalSettingsStore.SetLimits(uid, await GetAsync<LimitSettingDto>("api/settings/limits")); } catch { }
+		try { LocalSettingsStore.SetRoomCooldown(uid, await GetAsync<RoomCooldownSettingDto>("api/settings/room-cooldown")); } catch { }
+		try { LocalSettingsStore.SetStrategyChains(uid, await GetAsync<List<StrategyChainDto>>("api/settings/strategy-chains")); } catch { }
+	}
+
+	// 행렬 셀 — 로컬 우선.
 	public async Task<List<MatrixCellDto>> GetMatrixCellsAsync(int betAmountType = 11)
 	{
-		return await GetAsync<List<MatrixCellDto>>($"api/settings/matrix-cells?betAmountType={betAmountType}");
+		string? uid = AuthService.CurrentUserId;
+		List<MatrixCellDto>? local = LocalSettingsStore.GetMatrixCells(uid, betAmountType);
+		if (local != null)
+		{
+			return local;
+		}
+		List<MatrixCellDto> server = await GetAsync<List<MatrixCellDto>>($"api/settings/matrix-cells?betAmountType={betAmountType}");
+		LocalSettingsStore.SetMatrixCells(uid, betAmountType, server);
+		return server;
 	}
 
 	public async Task SaveMatrixCellsAsync(List<MatrixCellDto> cells, int betAmountType = 11)
 	{
+		LocalSettingsStore.SetMatrixCells(AuthService.CurrentUserId, betAmountType, cells);
 		await PostAsync($"api/settings/matrix-cells?betAmountType={betAmountType}", cells);
 	}
 
+	// 행렬 행규칙 — 로컬 우선.
 	public async Task<List<MatrixRowRuleDto>> GetMatrixRowRulesAsync(int betAmountType = 11)
 	{
-		return await GetAsync<List<MatrixRowRuleDto>>($"api/settings/matrix-row-rules?betAmountType={betAmountType}");
+		string? uid = AuthService.CurrentUserId;
+		List<MatrixRowRuleDto>? local = LocalSettingsStore.GetMatrixRowRules(uid, betAmountType);
+		if (local != null)
+		{
+			return local;
+		}
+		List<MatrixRowRuleDto> server = await GetAsync<List<MatrixRowRuleDto>>($"api/settings/matrix-row-rules?betAmountType={betAmountType}");
+		LocalSettingsStore.SetMatrixRowRules(uid, betAmountType, server);
+		return server;
 	}
 
 	public async Task SaveMatrixRowRulesAsync(List<MatrixRowRuleDto> rules, int betAmountType = 11)
 	{
+		LocalSettingsStore.SetMatrixRowRules(AuthService.CurrentUserId, betAmountType, rules);
 		await PostAsync($"api/settings/matrix-row-rules?betAmountType={betAmountType}", rules);
 	}
 
+	// 한도 — 로컬 우선.
 	public async Task<LimitSettingDto> GetLimitsAsync()
 	{
-		return await GetAsync<LimitSettingDto>("api/settings/limits");
+		string? uid = AuthService.CurrentUserId;
+		LimitSettingDto? local = LocalSettingsStore.GetLimits(uid);
+		if (local != null)
+		{
+			return local;
+		}
+		LimitSettingDto server = await GetAsync<LimitSettingDto>("api/settings/limits");
+		LocalSettingsStore.SetLimits(uid, server);
+		return server;
 	}
 
 	public async Task SaveLimitsAsync(LimitSettingDto limits)
 	{
+		LocalSettingsStore.SetLimits(AuthService.CurrentUserId, limits);
 		await PostAsync("api/settings/limits", limits);
 	}
 
+	// 예외 서식 — 로컬 우선.
 	public async Task<List<ExceptionFormatDto>> GetExceptionFormatsAsync()
 	{
-		return await GetAsync<List<ExceptionFormatDto>>("api/settings/exception-formats");
+		string? uid = AuthService.CurrentUserId;
+		List<ExceptionFormatDto>? local = LocalSettingsStore.GetExceptionFormats(uid);
+		if (local != null)
+		{
+			return local;
+		}
+		List<ExceptionFormatDto> server = await GetAsync<List<ExceptionFormatDto>>("api/settings/exception-formats");
+		LocalSettingsStore.SetExceptionFormats(uid, server);
+		return server;
 	}
 
 	public async Task SaveExceptionFormatsAsync(List<ExceptionFormatDto> formats)
 	{
+		LocalSettingsStore.SetExceptionFormats(AuthService.CurrentUserId, formats);
 		await PostAsync("api/settings/exception-formats", formats);
 	}
 
+	// 방 게이트 서식 — 로컬 우선(NotFound 는 빈 목록으로 캐시).
 	public async Task<List<RoomGateFormatDto>> GetRoomGateFormatsAsync()
 	{
+		string? uid = AuthService.CurrentUserId;
+		List<RoomGateFormatDto>? local = LocalSettingsStore.GetRoomGateFormats(uid);
+		if (local != null)
+		{
+			return local;
+		}
 		try
 		{
-			return await GetAsync<List<RoomGateFormatDto>>("api/settings/room-gate-formats");
+			List<RoomGateFormatDto> server = await GetAsync<List<RoomGateFormatDto>>("api/settings/room-gate-formats");
+			LocalSettingsStore.SetRoomGateFormats(uid, server);
+			return server;
 		}
 		catch (ApiException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
 		{
-			return new List<RoomGateFormatDto>();
+			List<RoomGateFormatDto> empty = new List<RoomGateFormatDto>();
+			LocalSettingsStore.SetRoomGateFormats(uid, empty);
+			return empty;
 		}
 	}
 
 	public async Task SaveRoomGateFormatsAsync(List<RoomGateFormatDto> formats)
 	{
+		LocalSettingsStore.SetRoomGateFormats(AuthService.CurrentUserId, formats);
 		await PostAsync("api/settings/room-gate-formats", formats);
 	}
 
+	// 방 쿨다운 — 로컬 우선(NotFound 는 비활성 기본값으로 캐시).
 	public async Task<RoomCooldownSettingDto?> GetRoomCooldownSettingsAsync()
 	{
+		string? uid = AuthService.CurrentUserId;
+		RoomCooldownSettingDto? local = LocalSettingsStore.GetRoomCooldown(uid);
+		if (local != null)
+		{
+			return local;
+		}
 		try
 		{
-			return await GetAsync<RoomCooldownSettingDto>("api/settings/room-cooldown");
+			RoomCooldownSettingDto server = await GetAsync<RoomCooldownSettingDto>("api/settings/room-cooldown");
+			LocalSettingsStore.SetRoomCooldown(uid, server);
+			return server;
 		}
 		catch (ApiException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
 		{
-			return null;
+			RoomCooldownSettingDto disabled = new RoomCooldownSettingDto(false, 0, 0);
+			LocalSettingsStore.SetRoomCooldown(uid, disabled);
+			return disabled;
 		}
 	}
 
 	public async Task SaveRoomCooldownSettingsAsync(RoomCooldownSettingDto dto)
 	{
+		LocalSettingsStore.SetRoomCooldown(AuthService.CurrentUserId, dto);
 		await PutAsync("api/settings/room-cooldown", dto);
 	}
 
+	// 전략 체인 — 로컬 우선(목록 캐시). 활성 체인은 목록에서 도출. 저장/활성화/삭제 시 캐시 무효화.
 	public async Task<StrategyChainDto?> GetActiveStrategyChainAsync()
 	{
+		string? uid = AuthService.CurrentUserId;
+		List<StrategyChainDto>? localList = LocalSettingsStore.GetStrategyChains(uid);
+		if (localList != null)
+		{
+			return localList.FirstOrDefault(c => c.IsActive);
+		}
 		try
 		{
 			return await GetAsync<StrategyChainDto>("api/settings/strategy-chains/active");
@@ -225,22 +386,33 @@ public class ApiClient : IDisposable
 
 	public async Task<List<StrategyChainDto>> GetStrategyChainsAsync()
 	{
-		return await GetAsync<List<StrategyChainDto>>("api/settings/strategy-chains");
+		string? uid = AuthService.CurrentUserId;
+		List<StrategyChainDto>? local = LocalSettingsStore.GetStrategyChains(uid);
+		if (local != null)
+		{
+			return local;
+		}
+		List<StrategyChainDto> server = await GetAsync<List<StrategyChainDto>>("api/settings/strategy-chains");
+		LocalSettingsStore.SetStrategyChains(uid, server);
+		return server;
 	}
 
 	public async Task SaveStrategyChainAsync(StrategyChainDto chain)
 	{
 		await PostAsync("api/settings/strategy-chains", chain);
+		LocalSettingsStore.InvalidateStrategyChains(AuthService.CurrentUserId);
 	}
 
 	public async Task DeleteStrategyChainAsync(long chainId)
 	{
 		await DeleteAsync($"api/settings/strategy-chains/{chainId}");
+		LocalSettingsStore.InvalidateStrategyChains(AuthService.CurrentUserId);
 	}
 
 	public async Task ActivateStrategyChainAsync(long chainId)
 	{
 		await PostAsync($"api/settings/strategy-chains/{chainId}/activate", new { });
+		LocalSettingsStore.InvalidateStrategyChains(AuthService.CurrentUserId);
 	}
 
 	public async Task SaveBettingHistoryAsync(string betType, decimal betAmount, string status, decimal balanceBefore, decimal balanceAfter, bool isVirtual = false, string? tableId = null, string? gameId = null, int? betAmountType = null, int? matrixRow = null, int? matrixCol = null)

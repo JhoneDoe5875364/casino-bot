@@ -35,6 +35,8 @@ public class AuthService
 			LoginResponse obj = await Api.LoginAsync(username, password);
 			CurrentUserId = obj.UserId;
 			CurrentUserName = obj.UserName;
+			// 로그인 직후 백그라운드로 서버 설정을 로컬에 씨딩(관리자 수정 반영 + 화면 즉시 열기). UI는 기다리지 않는다.
+			_ = Api.SeedSettingsFromServerAsync();
 			IsActive = obj.IsActive;
 			ExpirationDate = obj.ExpirationDate;
 			CurrentSessionId = obj.SessionId;

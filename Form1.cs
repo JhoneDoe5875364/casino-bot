@@ -312,6 +312,8 @@ public partial class Form1 : Form
 		_cdpService.PpUserIdDetected += CdpService_PpUserIdDetected;
 		chkSelectAll.CheckedChanged += ChkSelectAll_CheckedChanged;
 		cmbBetAmountType.Items.AddRange(((IEnumerable<(string, int)>)BetAmountOptions).Select((Func<(string, int), object>)(((string Name, int Type) o) => o.Name)).ToArray());
+		// 전략 체인: 실제 베팅금 타입이 아니라(=-1) 여러 전략을 순서대로 잇는 모드. 콤보 끝에 추가 항목으로 붙인다.
+		cmbBetAmountType.Items.Add("전략 체인");
 		cmbBetAmountType.SelectedIndex = 0;
 		cmbBetAmountType.SelectedIndexChanged += CmbBetAmountType_SelectedIndexChanged;
 		btnGameStart.Click += BtnGameStart_Click;
@@ -507,7 +509,6 @@ public partial class Form1 : Form
 	private async void CmbBetAmountType_SelectedIndexChanged(object? sender, EventArgs e)
 	{
 		bool isChain = cmbBetAmountType.SelectedItem?.ToString() == "전략 체인";
-		sfButton1.Text = (isChain ? "체인설정" : "상/하한 설정");
 		if (!isChain)
 		{
 			await LoadBetStepsAsync();
@@ -2323,6 +2324,7 @@ public partial class Form1 : Form
 			(btnFormatManage.Text, delegate { BtnFormatManage_Click(this, EventArgs.Empty); }, false),
 			(btnPriorityManage.Text, delegate { BtnPriorityManage_Click(this, EventArgs.Empty); }, false),
 			(sfButton1.Text, delegate { SfButton1_Click(this, EventArgs.Empty); }, false),
+			("체인설정", delegate { OpenStrategyChainSettings(); }, false),
 			(btnOptionSetting.Text, delegate { BtnOptionSetting_Click(this, EventArgs.Empty); }, false),
 			(btnSecondLogic.Text, delegate { BtnSecondLogic_Click(this, EventArgs.Empty); }, false),
 			(btnMatrixStats.Text, delegate { BtnMatrixStats_Click(this, EventArgs.Empty); }, false),
@@ -3180,19 +3182,20 @@ public partial class Form1 : Form
 
 	private void SfButton1_Click(object? sender, EventArgs e)
 	{
-		if (cmbBetAmountType.SelectedItem?.ToString() == "전략 체인")
-		{
-			ApiClient api = AuthService.Api;
-			if (api == null)
-			{
-				return;
-			}
-			using StrategyChainSettingForm form = new StrategyChainSettingForm(api);
-			form.ShowDialog(this);
-			return;
-		}
 		using LimitSettingForm form2 = new LimitSettingForm(_currentUserId);
 		form2.ShowDialog(this);
+	}
+
+	/// <summary>전략 체인 설정 창을 연다(설정 메뉴의 '체인설정' 버튼 전용).</summary>
+	private void OpenStrategyChainSettings()
+	{
+		ApiClient api = AuthService.Api;
+		if (api == null)
+		{
+			return;
+		}
+		using StrategyChainSettingForm form = new StrategyChainSettingForm(api);
+		form.ShowDialog(this);
 	}
 
 	private void BtnExceptionFormat_Click(object? sender, EventArgs e)

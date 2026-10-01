@@ -432,7 +432,11 @@ public partial class BetAmountSettingForm : Form
 				{
 					break;
 				}
-				foreach (MatrixCellDto c in (await api.GetMatrixCellsAsync(type)).Where(delegate(MatrixCellDto matrixCellDto)
+				// [성능] 셀·행규칙은 서로 독립적 → 동시에 요청해 원격 서버 왕복을 반으로 줄인다.
+				Task<List<MatrixCellDto>> _cellsTask = api.GetMatrixCellsAsync(type);
+				Task<List<MatrixRowRuleDto>> _rulesTask = api.GetMatrixRowRulesAsync(type);
+				await Task.WhenAll(_cellsTask, _rulesTask);
+				foreach (MatrixCellDto c in _cellsTask.Result.Where(delegate(MatrixCellDto matrixCellDto)
 				{
 					if (matrixCellDto.RowIndex >= 1 && matrixCellDto.RowIndex <= MatrixStepsPerRow.Length)
 					{
@@ -447,7 +451,7 @@ public partial class BetAmountSettingForm : Form
 				{
 					cellCache[(c.RowIndex, c.ColIndex)] = c.Amount;
 				}
-				foreach (MatrixRowRuleDto r in (await api.GetMatrixRowRulesAsync(type)).Where((MatrixRowRuleDto matrixRowRuleDto) => matrixRowRuleDto.RowIndex >= 1 && matrixRowRuleDto.RowIndex <= MatrixStepsPerRow.Length))
+				foreach (MatrixRowRuleDto r in _rulesTask.Result.Where((MatrixRowRuleDto matrixRowRuleDto) => matrixRowRuleDto.RowIndex >= 1 && matrixRowRuleDto.RowIndex <= MatrixStepsPerRow.Length))
 				{
 					int num;
 					if (UsesMatrixRowRules(type) && r.WinCount >= 1)
@@ -1356,6 +1360,7 @@ public partial class BetAmountSettingForm : Form
 		{
 			btnSave.Enabled = false;
 			SaveGridToCache();
+			List<Task> saveTasks = new List<Task>();
 			ApiClient api = AuthService.Api;
 			int[] matrixBetAmountTypes;
 			if (api != null)
@@ -1366,7 +1371,7 @@ public partial class BetAmountSettingForm : Form
 					List<MatrixCellDto> matrixDtos = (from kv in _matrixCellsCacheByType[type]
 						where kv.Value >= 0m
 						select new MatrixCellDto(kv.Key.Row, kv.Key.Col, kv.Value)).ToList();
-					await api.SaveMatrixCellsAsync(matrixDtos, type);
+					saveTasks.Add(api.SaveMatrixCellsAsync(matrixDtos, type));
 					List<MatrixRowRuleDto> matrixRowRuleDtos = (from kv in _matrixRowRulesCacheByType[type].Where(delegate(KeyValuePair<int, (int WinCount, int TargetRow, int WinMode, int RestMinutes, decimal FirstRowCapAmount)> kv)
 						{
 							if (kv.Value.WinCount >= 1)
@@ -1386,7 +1391,7 @@ public partial class BetAmountSettingForm : Form
 							return true;
 						})
 						select new MatrixRowRuleDto(kv.Key, kv.Value.WinCount, kv.Value.TargetRow, kv.Value.WinMode, kv.Value.RestMinutes, kv.Value.FirstRowCapAmount)).ToList();
-					await api.SaveMatrixRowRulesAsync(matrixRowRuleDtos, type);
+					saveTasks.Add(api.SaveMatrixRowRulesAsync(matrixRowRuleDtos, type));
 				}
 			}
 			int[] saveTypes = new int[11]
@@ -1406,31 +1411,31 @@ public partial class BetAmountSettingForm : Form
 				case 3:
 				{
 					Dictionary<int, (decimal?, int?)> mixedData = data.ToDictionary((KeyValuePair<int, decimal?> kv) => kv.Key, (KeyValuePair<int, decimal?> kv) => (Value: kv.Value, _mixedMethodCache.GetValueOrDefault(kv.Key)));
-					await _betAmountSettingService.SaveMixedBetAmountsAsync(_userId, mixedData);
+					saveTasks.Add(_betAmountSettingService.SaveMixedBetAmountsAsync(_userId, mixedData));
 					break;
 				}
 				case 1:
 				{
 					Dictionary<int, (decimal?, int?)> hongKongData = data.ToDictionary((KeyValuePair<int, decimal?> kv) => kv.Key, (KeyValuePair<int, decimal?> kv) => (Value: kv.Value, _hongKongTargetCache.TryGetValue(kv.Key, out var value) ? new int?(value) : ((int?)null)));
-					await _betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, hongKongData, 1);
+					saveTasks.Add(_betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, hongKongData, 1));
 					break;
 				}
 				case 5:
 				{
 					Dictionary<int, (decimal?, int?)> martinDAlembertData = data.ToDictionary((KeyValuePair<int, decimal?> kv) => kv.Key, (KeyValuePair<int, decimal?> kv) => (Value: kv.Value, (kv.Key == 1) ? new int?(_martinMaxStepCache) : ((int?)null)));
-					await _betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, martinDAlembertData);
+					saveTasks.Add(_betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, martinDAlembertData));
 					break;
 				}
 				case 7:
 				{
 					Dictionary<int, (decimal?, int?)> oscarData = data.ToDictionary((KeyValuePair<int, decimal?> kv) => kv.Key, (KeyValuePair<int, decimal?> kv) => (Value: kv.Value, (kv.Key == 1) ? new int?(_oscarTargetUnitsCache) : ((int?)null)));
-					await _betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, oscarData, 7);
+					saveTasks.Add(_betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, oscarData, 7));
 					break;
 				}
 				case 9:
 				{
 					Dictionary<int, (decimal?, int?)> labData = data.ToDictionary((KeyValuePair<int, decimal?> kv) => kv.Key, (KeyValuePair<int, decimal?> kv) => (Value: kv.Value, (kv.Key == 1) ? new int?((int)_labouchereMultiplierCache) : ((int?)null)));
-					await _betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, labData, 9);
+					saveTasks.Add(_betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, labData, 9));
 					break;
 				}
 				case 10:
@@ -1440,14 +1445,16 @@ public partial class BetAmountSettingForm : Form
 						[1] = (0m, _dalmenzingMaxStepCache),
 						[2] = (0m, _dalmenzingRecoveryMethodCache)
 					};
-					await _betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, dalmenzingData, 10);
+					saveTasks.Add(_betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, dalmenzingData, 10));
 					break;
 				}
 				default:
-					await _betAmountSettingService.SaveUserBetAmountsAsync(_userId, data, type2);
+					saveTasks.Add(_betAmountSettingService.SaveUserBetAmountsAsync(_userId, data, type2));
 					break;
 				}
 			}
+			// [성능] 위에서 모은 저장 요청을 동시에 처리(순차 최대 19왕복 -> 겹쳐서 처리).
+			await Task.WhenAll(saveTasks);
 			MessageBox.Show("베팅금 설정이 저장되었습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
 			base.DialogResult = DialogResult.OK;
 			Close();

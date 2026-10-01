@@ -347,8 +347,38 @@ public class StrategyChainSettingForm : Form
 			}
 			StrategyChainDto dto = new StrategyChainDto(_currentChainId, txtChainName.Text.Trim(), cmbCompletionAction.SelectedIndex, IsActive: false, steps);
 			await _apiClient.SaveStrategyChainAsync(dto);
-			MessageBox.Show("전략 체인이 저장되었습니다.", "성공", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
-			await LoadChainsAsync();
+			// 저장하면 곧바로 이 체인을 활성화한다(관리자 페이지에서 따로 켤 필요 없음).
+			// 활성화는 서버의 단일-활성 endpoint를 쓰므로 다른 체인은 자동으로 비활성화된다.
+			// 신규 체인은 저장 시 서버가 Id를 부여하므로, 목록을 다시 받아 방금 저장한 이름으로 Id를 찾는다.
+			bool activated = false;
+			try
+			{
+				long activateId = _currentChainId;
+				if (activateId <= 0L)
+				{
+					List<StrategyChainDto> saved = await _apiClient.GetStrategyChainsAsync();
+					activateId = saved
+						.Where((StrategyChainDto c) => string.Equals(c.Name, dto.Name, StringComparison.Ordinal))
+						.OrderByDescending((StrategyChainDto c) => c.Id)
+						.Select((StrategyChainDto c) => c.Id)
+						.FirstOrDefault();
+				}
+				if (activateId > 0L)
+				{
+					await _apiClient.ActivateStrategyChainAsync(activateId);
+					activated = true;
+				}
+			}
+			catch
+			{
+				// 저장은 성공했으므로 활성화 실패는 치명적이지 않다 — 아래 안내로 대체한다.
+			}
+			MessageBox.Show(activated
+				? "전략 체인이 저장되고 활성화되었습니다."
+				: "전략 체인이 저장되었습니다. (자동 활성화 실패 — 목록에서 '활성화'를 눌러주세요)",
+				"성공", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+			// 저장 성공 후 창을 닫아 설정 허브로 복귀(다른 설정창과 동일). 예전엔 목록만 갱신하고 창에 머물렀다.
+			Close();
 		}
 		catch (Exception ex)
 		{

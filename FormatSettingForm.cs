@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using PragmaticBot.Models.Api;
@@ -43,6 +44,37 @@ public partial class FormatSettingForm : Form
 			SyncBpCrossState();
 		};
 		SyncBpCrossState();
+		// [서식 txt] 그리드 아래 왼쪽에 불러오기/내보내기 버튼을 코드로 추가(디자이너 미변경).
+		Button btnImport = new Button
+		{
+			Text = "txt 불러오기",
+			Location = new Point(12, 545),
+			Size = new Size(120, 35),
+			Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+			FlatStyle = FlatStyle.Flat,
+			BackColor = Color.FromArgb(45, 55, 72),
+			ForeColor = Color.FromArgb(234, 234, 234),
+			Font = new Font("맑은 고딕", 9f, FontStyle.Bold)
+		};
+		btnImport.FlatAppearance.BorderSize = 0;
+		btnImport.Click += BtnImport_Click;
+		Button btnExport = new Button
+		{
+			Text = "txt 내보내기",
+			Location = new Point(140, 545),
+			Size = new Size(120, 35),
+			Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+			FlatStyle = FlatStyle.Flat,
+			BackColor = Color.FromArgb(45, 55, 72),
+			ForeColor = Color.FromArgb(234, 234, 234),
+			Font = new Font("맑은 고딕", 9f, FontStyle.Bold)
+		};
+		btnExport.FlatAppearance.BorderSize = 0;
+		btnExport.Click += BtnExport_Click;
+		Controls.Add(btnImport);
+		Controls.Add(btnExport);
+		btnImport.BringToFront();
+		btnExport.BringToFront();
 	}
 
 	private void SyncBpCrossState()
@@ -109,6 +141,69 @@ public partial class FormatSettingForm : Form
 		finally
 		{
 			btnSave.Enabled = true;
+		}
+	}
+
+	private void BtnImport_Click(object? sender, EventArgs e)
+	{
+		using OpenFileDialog dlg = new OpenFileDialog
+		{
+			Filter = "텍스트 파일 (*.txt)|*.txt|모든 파일 (*.*)|*.*",
+			Title = "서식 txt 불러오기"
+		};
+		if (dlg.ShowDialog(this) != DialogResult.OK)
+			return;
+		try
+		{
+			string[] lines = File.ReadAllLines(dlg.FileName);
+			int count = 0;
+			for (int i = 0; i < dgvFormats.Rows.Count; i++)
+			{
+				string value = (i < lines.Length) ? lines[i].Trim() : "";
+				dgvFormats.Rows[i].Cells[1].Value = value;
+				if (value.Length > 0)
+					count++;
+			}
+			MessageBox.Show($"{count}개 서식을 불러왔습니다. 확인 후 [저장]을 눌러야 서버에 반영됩니다.", "불러오기 완료", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+		}
+		catch (Exception ex)
+		{
+			MessageBox.Show("불러오기 중 오류가 발생했습니다: " + ex.Message, "오류", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+	}
+
+	private void BtnExport_Click(object? sender, EventArgs e)
+	{
+		using SaveFileDialog dlg = new SaveFileDialog
+		{
+			Filter = "텍스트 파일 (*.txt)|*.txt",
+			Title = "서식 txt 내보내기",
+			FileName = "서식.txt"
+		};
+		if (dlg.ShowDialog(this) != DialogResult.OK)
+			return;
+		try
+		{
+			List<string> lines = new List<string>();
+			int lastNonEmpty = -1;
+			for (int i = 0; i < dgvFormats.Rows.Count; i++)
+			{
+				string text = dgvFormats.Rows[i].Cells[1].Value?.ToString() ?? "";
+				lines.Add(text);
+				if (text.Trim().Length > 0)
+					lastNonEmpty = i;
+			}
+			if (lastNonEmpty < 0)
+			{
+				MessageBox.Show("내보낼 서식이 없습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+				return;
+			}
+			File.WriteAllLines(dlg.FileName, lines.GetRange(0, lastNonEmpty + 1));
+			MessageBox.Show($"{lastNonEmpty + 1}줄을 저장했습니다.", "내보내기 완료", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
+		}
+		catch (Exception ex)
+		{
+			MessageBox.Show("내보내기 중 오류가 발생했습니다: " + ex.Message, "오류", MessageBoxButtons.OK, MessageBoxIcon.Hand);
 		}
 	}
 
