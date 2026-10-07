@@ -905,6 +905,7 @@ public class PragmaticAutoBettingService
 			}
 			Context.IsRunning = true;
 			Context.RoomStates.Clear();
+			Context.UpchigiGlobalNet = 0m;
 			Context.TotalBetAmount = 0m;
 			Context.PendingBetAmount = 0m;
 			Context.LastGlobalBetTime = null;
@@ -1503,11 +1504,6 @@ public class PragmaticAutoBettingService
 		{
 			historyCopy = new List<GameResult>(history);
 		}
-		if (historyCopy.Count == 0)
-		{
-			FileLogger.Log("[AutoBetting] " + tableId + ": ExecuteTimer 스킵 (히스토리 비어있음)");
-			return;
-		}
 		string ridingTarget = null;
 		bool isSecondLogicActiveRoom = false;
 		if (IsSecondLogic)
@@ -1522,6 +1518,17 @@ public class PragmaticAutoBettingService
 			}
 		}
 		bool isDoubleUpRound = IsHongKongDoubleUpPending(tableId, roomState) && (!IsSecondLogic | isSecondLogicActiveRoom);
+		// 슈 교체 직후 히스토리가 비어도, 서식 없이 직전 타겟으로 베팅하는 '줄타기/업치기 연속' 상황이면 그 한 라운드도 진행한다.
+		// (예전엔 히스토리가 비면 무조건 스킵해 슈가 바뀌면 줄타기가 한 판 쉬었다 — 그 결함 수정)
+		bool ridesWithoutFormat = ridingTarget != null || isDoubleUpRound
+			|| (Context.SelectedBetAmountType == 15 && !string.IsNullOrEmpty(roomState.LastBetType)
+				&& (roomState.IsUpchigiFlatPhase || roomState.CurrentStep > 1))
+			|| (Context.IsPbCrossEnabled && !string.IsNullOrEmpty(roomState.PbCrossTarget));
+		if (historyCopy.Count == 0 && !ridesWithoutFormat)
+		{
+			FileLogger.Log("[AutoBetting] " + tableId + ": ExecuteTimer 스킵 (히스토리 비어있음)");
+			return;
+		}
 		if (ridingTarget == null && !isDoubleUpRound && Context.ExceptionPatterns.Count > 0)
 		{
 			ExceptionPattern exMatch = _patternParser.FindMatchingExceptionPattern(historyCopy, Context.ExceptionPatterns);
@@ -1579,7 +1586,24 @@ public class PragmaticAutoBettingService
 			isPbCrossForced = true;
 			FileLogger.Log($"[PB교차] {tableId}: 서식 매칭 우회 - 타겟={crossTarget} (직전 베팅={roomState.LastBetType ?? "없음"}, 단계={roomState.CurrentStep})", "Info", "PatternMatch");
 		}
-		if (!isDoubleUpForced && !isRidingForced && !isPbCrossForced)
+		if (!isDoubleUpForced && !isRidingForced && !isPbCrossForced
+			&& Context.SelectedBetAmountType == 15 && !string.IsNullOrEmpty(roomState.LastBetType)
+			&& (roomState.IsUpchigiFlatPhase || roomState.CurrentStep > 1))
+		{
+			// 업치기 자동 연속: 당첨로 2단계 이상 진입했으면 서식 재매칭 없이 직전 타겟으로 자동 베팅(대상 동일).
+			matchedPattern = new BettingPattern
+			{
+				Number = 0,
+				RawText = roomState.IsUpchigiFlatPhase ? "[일정베팅]" : "[업치기]",
+				BetTarget = roomState.LastBetType,
+				Sequence = new List<string>(),
+				IsValid = true
+			};
+			FileLogger.Log(roomState.IsUpchigiFlatPhase
+				? $"[업치기] {tableId}: 서식 매칭 우회 - 일정베팅 자동 연속, 타겟={roomState.LastBetType}"
+				: $"[업치기] {tableId}: 서식 매칭 우회 - 자동 업치기 {roomState.CurrentStep}단계, 타겟={roomState.LastBetType}");
+		}
+		else if (!isDoubleUpForced && !isRidingForced && !isPbCrossForced)
 		{
 			matchedPattern = _patternParser.FindMatchingPattern(historyCopy, Context.Patterns);
 			if (matchedPattern == null)
@@ -1709,6 +1733,29 @@ public class PragmaticAutoBettingService
 				FileLogger.Log("[진단][플랫] " + tableId + ": 베팅금 0 → 스킵", "Warning", "AutoBetting");
 				return;
 			}
+		}
+		else if (Context.SelectedBetAmountType == 15)
+		{
+			// 업치기(파레이): 업치기 단계면 시작금×2^(단계-1), N단계 완료 후 일정베팅 단계면 일정금.
+			if (roomState.IsUpchigiFlatPhase)
+			{
+				// 일정금액도 시작금액과 같은 배수(누적실패 임계로 올라간 UpchigiStartMultiplier)로 올린다.
+				betAmount = Context.UpchigiFlatAmount * Math.Max(1m, roomState.UpchigiStartMultiplier);
+			}
+			else
+			{
+				int expo = Math.Max(0, Math.Min(30, step - 1));
+				decimal effectiveStart = Context.UpchigiStartAmount * Math.Max(1m, roomState.UpchigiStartMultiplier);
+				betAmount = effectiveStart * (decimal)(1L << expo);
+			}
+			if (betAmount <= 0m)
+			{
+				FileLogger.Log($"[진단][업치기] {tableId}: 베팅금 0 → 스킵 (단계={step})", "Warning", "AutoBetting");
+				return;
+			}
+			string upPhaseText = (roomState.IsUpchigiFlatPhase ? "일정베팅" : ("업치기 " + step + "단계"));
+			string upMultText = (roomState.UpchigiStartMultiplier > 1m ? $", 시작배수 ×{roomState.UpchigiStartMultiplier:0.##}" : "");
+				FileLogger.Log($"[진단][업치기] {tableId}: {upPhaseText}, 금액={betAmount:N0}{upMultText}", "Debug", "AutoBetting");
 		}
 		else if (Context.SelectedBetAmountType == 9)
 		{
@@ -2374,6 +2421,9 @@ public class PragmaticAutoBettingService
 				break;
 			case 10:
 				HandleDalmenzingResult(tableId, roomState, isTie, isWin, stepBefore, ref shouldFireLastStepReset, ref shouldFireStepReset);
+				break;
+			case 15:
+				HandleUpchigiResult(tableId, roomState, isTie, isWin, stepBefore, ref shouldFireLastStepReset, ref shouldFireStepReset);
 				break;
 			default:
 				if (AutoBettingContext.IsMatrixType(effectiveMethod))
@@ -3238,6 +3288,104 @@ public class PragmaticAutoBettingService
 		nextStep = 1;
 	}
 
+	// 업치기(파레이) 결과 처리: 당첨 → 다음 단계(×2) 자동 진행, 미당첨 → 1단계 초기화,
+	// N단계 당첨 완료 → 일정베팅 전환, 사이클 순손익 > 합산수익 임계 → 1단계+수익카운터 리셋.
+	private void HandleUpchigiResult(string tableId, RoomBettingState roomState, bool isTie, bool isWin, int stepBefore, ref bool shouldFireLastStepReset, ref bool shouldFireStepReset)
+	{
+		if (isTie)
+		{
+			FileLogger.Log($"[AutoBetting][업치기] {tableId}: Tie - 단계/사이클 유지 (단계={roomState.CurrentStep}, 일정={(roomState.IsUpchigiFlatPhase ? "예" : "아니오")})");
+			return;
+		}
+		decimal net = isWin ? GetNetWinProfit(roomState.LastBetType, roomState.LastBetAmount) : (0m - roomState.LastBetAmount);
+		roomState.UpchigiCycleNet += net;
+		Context.UpchigiGlobalNet += net;   // 전체(모든 방) 합산 순손익 누적 — 합산수익 리셋은 이 값으로 판정
+		int N = Math.Max(1, Context.UpchigiStepCount);
+		bool hasFlat = Context.UpchigiFlatAmount > 0m;   // 일정금액 미설정이면 일정베팅을 하지 않는다
+		bool wasFlatPhase = roomState.IsUpchigiFlatPhase;   // 이번 라운드가 일정베팅 구간이었는지(판정 전 상태)
+		if (!wasFlatPhase)
+		{
+			if (isWin)
+			{
+				if (roomState.CurrentStep >= N)
+				{
+					// N단계 완주: 일정금액이 있으면 일정베팅으로, 없으면 바로 1단계부터 업치기 재시작.
+					roomState.CurrentStep = 1;
+					if (hasFlat)
+					{
+						roomState.IsUpchigiFlatPhase = true;
+						FileLogger.Log($"[AutoBetting][업치기] {tableId}: {N}단계 완주 → 일정베팅 전환(서식 적중 시 업치기 재개) (전체순손익={Context.UpchigiGlobalNet:+#,##0;-#,##0;0})");
+					}
+					else
+					{
+						FileLogger.Log($"[AutoBetting][업치기] {tableId}: {N}단계 완주 → 1단계 업치기 재시작(일정금액 미설정) (전체순손익={Context.UpchigiGlobalNet:+#,##0;-#,##0;0})");
+					}
+				}
+				else
+				{
+					roomState.CurrentStep++;
+					FileLogger.Log($"[AutoBetting][업치기] {tableId}: 당첨 → 업치기 {roomState.CurrentStep}단계 (전체순손익={Context.UpchigiGlobalNet:+#,##0;-#,##0;0})");
+				}
+			}
+			else
+			{
+				roomState.CurrentStep = 1;
+				FileLogger.Log($"[AutoBetting][업치기] {tableId}: 미당첨 → 1단계 초기화 (전체순손익={Context.UpchigiGlobalNet:+#,##0;-#,##0;0})");
+			}
+		}
+		else
+		{
+			// 일정베팅 구간: 일정금액으로 베팅하다가 미당첨(실패)하면 1단계로 초기화(업치기 재시작). 당첨이면 일정베팅 유지.
+			if (!isWin)
+			{
+				roomState.IsUpchigiFlatPhase = false;
+				roomState.CurrentStep = 1;
+				FileLogger.Log($"[AutoBetting][업치기] {tableId}: 일정베팅 미당첨 → 1단계 초기화(업치기 재시작) (전체순손익={Context.UpchigiGlobalNet:+#,##0;-#,##0;0})");
+			}
+			else
+			{
+				FileLogger.Log($"[AutoBetting][업치기] {tableId}: 일정베팅 당첨 → 일정베팅 유지 (전체순손익={Context.UpchigiGlobalNet:+#,##0;-#,##0;0})");
+			}
+		}
+		// 누적실패(미당첨 횟수) 상승: 미당첨마다 +1(업치기 단계·일정베팅 구간 모두 포함), 임계 도달 시 그 방의 시작금액 배수를 설정 배수만큼 누적 상승(×2→×4→…), 배수 상한까지만.
+		if (!isWin)
+		{
+			roomState.UpchigiFailAccum++;
+			int failThr = Context.UpchigiFailEscalateThreshold;
+			decimal escMult = Context.UpchigiFailEscalateMultiplier;
+			if (failThr > 0 && escMult > 1m && roomState.UpchigiFailAccum >= failThr)
+			{
+				decimal nextMult = Math.Max(1m, roomState.UpchigiStartMultiplier) * escMult;
+				decimal maxMult = Context.UpchigiFailEscalateMaxMultiplier;
+				bool capped = maxMult > 1m && nextMult >= maxMult;
+				if (capped)
+				{
+					nextMult = maxMult;
+				}
+				roomState.UpchigiStartMultiplier = nextMult;
+				roomState.UpchigiFailAccum = 0;
+				FileLogger.Log($"[AutoBetting][업치기] {tableId}: ★ 누적실패 {failThr}회 도달 → 시작금액 배수 ×{roomState.UpchigiStartMultiplier:0.##} {(capped ? "(상한 도달)" : "상승")}");
+			}
+		}
+		// 합산수익 리셋: 전체(모든 방) 합산 순손익이 합산수익을 넘으면 — 즉 전체 손실을 다 메우고
+		//   합산수익만큼 더 벌면 — 단계와 무관하게 모든 방을 1단계로 초기화하고 전체 순손익을 0으로 되돌린다.
+		decimal threshold = Context.UpchigiProfitResetThreshold;
+		if (threshold > 0m && Context.UpchigiGlobalNet > threshold)
+		{
+			FileLogger.Log($"[AutoBetting][업치기] {tableId}: ★ 전체 합산수익 도달 ({Context.UpchigiGlobalNet:N0} > {threshold:N0}) → 모든 방 1단계 초기화 + 전체 순손익 리셋");
+			foreach (RoomBettingState rs in Context.RoomStates.Values)
+			{
+				rs.CurrentStep = 1;
+				rs.IsUpchigiFlatPhase = false;
+				rs.UpchigiCycleNet = 0m;
+				rs.UpchigiStartMultiplier = 1m;
+				rs.UpchigiFailAccum = 0;
+			}
+			Context.UpchigiGlobalNet = 0m;
+		}
+		roomState.StepVersion++;
+	}
+
 	private void HandleLabouchereResult(string tableId, RoomBettingState roomState, bool isTie, bool isWin, int stepBefore, ref int nextStep, ref bool shouldFireLastStepReset, ref bool shouldFireStepReset)
 	{
 		if (isTie)
@@ -3759,6 +3907,7 @@ public class PragmaticAutoBettingService
 		{
 			Context.PendingBetAmount = 0m;
 			Context.RoomStates.Clear();
+			Context.UpchigiGlobalNet = 0m;
 		}
 		int minutes = Context.RestIntervalMinutes.GetValueOrDefault();
 		RaiseStateChanged(isRunning: true, $"목표 달성 - {minutes}분 휴식 중 ({Context.CompletedCycles}/{Context.SessionCount}회 완료)");
@@ -4246,9 +4395,10 @@ public class PragmaticAutoBettingService
 			10 => "달랑멘징", 
 			11 => "행렬", 
 			12 => "행렬달랑베르", 
-			13 => "스위칭행렬", 
-			14 => "달랑행렬", 
-			_ => $"타입{betAmountType}", 
+			13 => "스위칭행렬",
+			14 => "달랑행렬",
+			15 => "업치기",
+			_ => $"타입{betAmountType}",
 		};
 	}
 
@@ -4445,6 +4595,26 @@ public class PragmaticAutoBettingService
 			Context.FlatBetAmount = (baseEntry4?.Amount).GetValueOrDefault();
 			Context.BetAmounts = ((Context.FlatBetAmount > 0m) ? new Dictionary<int, decimal> { { 1, Context.FlatBetAmount } } : new Dictionary<int, decimal>());
 			Context.StepBettingMethods.Clear();
+			break;
+		}
+		case 15:
+		{
+			BetAmountSettingDto startEntry = amounts.FirstOrDefault((BetAmountSettingDto b) => b.Number == 1);
+			BetAmountSettingDto flatEntry = amounts.FirstOrDefault((BetAmountSettingDto b) => b.Number == 2);
+			BetAmountSettingDto thresholdEntry = amounts.FirstOrDefault((BetAmountSettingDto b) => b.Number == 3);
+			BetAmountSettingDto failThrEntry = amounts.FirstOrDefault((BetAmountSettingDto b) => b.Number == 4);
+			BetAmountSettingDto failMultEntry = amounts.FirstOrDefault((BetAmountSettingDto b) => b.Number == 5);
+			BetAmountSettingDto failMaxMultEntry = amounts.FirstOrDefault((BetAmountSettingDto b) => b.Number == 6);
+			Context.UpchigiStartAmount = (startEntry?.Amount).GetValueOrDefault();
+			Context.UpchigiStepCount = Math.Max(1, (startEntry?.BettingMethod).GetValueOrDefault(1));
+			Context.UpchigiFlatAmount = (flatEntry?.Amount).GetValueOrDefault();
+			Context.UpchigiProfitResetThreshold = (thresholdEntry?.Amount).GetValueOrDefault();
+			Context.UpchigiFailEscalateThreshold = (int)((failThrEntry?.Amount).GetValueOrDefault());
+			Context.UpchigiFailEscalateMultiplier = Math.Max(1m, (failMultEntry?.Amount).GetValueOrDefault(1m));
+			Context.UpchigiFailEscalateMaxMultiplier = (failMaxMultEntry?.Amount).GetValueOrDefault();
+			Context.BetAmounts = ((Context.UpchigiStartAmount > 0m) ? new Dictionary<int, decimal> { { 1, Context.UpchigiStartAmount } } : new Dictionary<int, decimal>());
+			Context.StepBettingMethods.Clear();
+			FileLogger.Log($"[AutoBetting][업치기] 로드: 시작={Context.UpchigiStartAmount:N0}, 단계={Context.UpchigiStepCount}, 일정={Context.UpchigiFlatAmount:N0}, 합산수익={Context.UpchigiProfitResetThreshold:N0}, 누적실패임계={Context.UpchigiFailEscalateThreshold}, 실패배수=×{Context.UpchigiFailEscalateMultiplier:0.##}, 배수상한={(Context.UpchigiFailEscalateMaxMultiplier > 1m ? $"×{Context.UpchigiFailEscalateMaxMultiplier:0.##}" : "없음")}");
 			break;
 		}
 		case 9:

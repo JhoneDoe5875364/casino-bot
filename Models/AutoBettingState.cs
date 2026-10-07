@@ -38,6 +38,18 @@ public class RoomBettingState
 
 	public string? DoubleUpTarget { get; set; }
 
+	// 업치기(파레이): N단계 당첨을 모두 마치면 일정베팅 단계로 전환(true). 미당첨/합산수익 리셋 시 false.
+	public bool IsUpchigiFlatPhase { get; set; }
+
+	// 업치기 사이클 순손익(마지막 합산수익 리셋 이후 누적) — 합산수익 임계 비교용.
+	public decimal UpchigiCycleNet { get; set; }
+
+	// 업치기 누적실패 카운터 — 미당첨마다 +1, 누적실패 임계 도달 시 시작금액 배수 상승 후 0으로 리셋.
+	public int UpchigiFailAccum { get; set; }
+
+	// 업치기 시작금액에 곱하는 현재 배수 — 누적실패 임계를 넘을 때마다 설정 배수만큼 누적 상승(합산수익 리셋 시 1로 원복).
+	public decimal UpchigiStartMultiplier { get; set; } = 1m;
+
 	public bool IsUnconfirmedBet { get; set; }
 
 	public decimal PreBetBalance { get; set; }
@@ -440,6 +452,30 @@ public class AutoBettingContext
 	public int OscarTargetUnits { get; set; } = 1;
 
 	public decimal FlatBetAmount { get; set; }
+
+	// 업치기(파레이) 설정: 단계수 N, 시작금액(1단계), 일정금액(N단계 완료 후), 합산수익 리셋 임계.
+	// 단계별 금액 = 시작금액 × 2^(단계-1) (마틴식 2배). 당첨 시 자동 다음 단계(대상 동일),
+	// 미당첨 시 1단계 초기화, N단계 완료 후 일정금액 일반 베팅, 사이클 순손익 > 임계면 1단계+수익 리셋.
+	public int UpchigiStepCount { get; set; } = 1;
+
+	public decimal UpchigiStartAmount { get; set; }
+
+	public decimal UpchigiFlatAmount { get; set; }
+
+	public decimal UpchigiProfitResetThreshold { get; set; }
+
+	// 누적실패(미당첨 횟수) 임계 — 한 방의 누적 미당첨이 이 값에 도달하면 그 방의 시작금액 배수를 올린다. 0=미사용.
+	public int UpchigiFailEscalateThreshold { get; set; }
+
+	// 누적실패 임계 도달 시 시작금액에 곱할 배수(누적 상승). 예: 2 → 임계마다 ×2씩 (×2,×4,×8…). 1 이하=미사용.
+	public decimal UpchigiFailEscalateMultiplier { get; set; } = 1m;
+
+	// 누적 상승한 배수의 상한 — 이 값을 넘지 않게 제한한다. 0 또는 1 이하=상한 없음.
+	public decimal UpchigiFailEscalateMaxMultiplier { get; set; }
+
+	// 업치기 전체(모든 방 합산) 순손익 — 마지막 합산수익 리셋 이후 모든 방의 당첨/미당첨을 합산한다.
+	// 이 값이 합산수익을 넘으면(= 전체 손실을 다 메우고 합산수익만큼 더 벌면) 모든 방을 1단계로 초기화한다.
+	public decimal UpchigiGlobalNet { get; set; }
 
 	public decimal LabouchereMultiplier { get; set; }
 

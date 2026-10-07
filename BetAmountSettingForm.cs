@@ -40,6 +40,25 @@ public partial class BetAmountSettingForm : Form
 
 	private int _dalmenzingRecoveryMethodCache;
 
+	// 업치기(파레이) — 단계수 캐시 + 프로그램 생성 패널/입력들(Designer 무수정)
+	private int _upchigiStepCountCache = 1;
+
+	private Panel? _pnlUpchigi;
+
+	private TextBox? _txtUpchigiStep;
+
+	private TextBox? _txtUpchigiStart;
+
+	private TextBox? _txtUpchigiFlat;
+
+	private TextBox? _txtUpchigiThreshold;
+
+	private TextBox? _txtUpchigiFailThreshold;
+
+	private TextBox? _txtUpchigiMultiplier;
+
+	private TextBox? _txtUpchigiMaxMultiplier;
+
 	private static readonly int[] MatrixStepsPerRow = new int[15]
 	{
 		20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
@@ -77,7 +96,7 @@ public partial class BetAmountSettingForm : Form
 	/// Kept in step with Form1.BetAmountOptions — a strategy the main screen can select but this form
 	/// cannot edit would be unusable, and vice versa.
 	/// </summary>
-	private static readonly (string Name, int Type)[] BetAmountOptions = new(string, int)[15]
+	private static readonly (string Name, int Type)[] BetAmountOptions = new(string, int)[16]
 	{
 		("마틴", 0),
 		("홍콩크루즈", 1),
@@ -93,7 +112,8 @@ public partial class BetAmountSettingForm : Form
 		("행렬", 11),
 		("행렬달랑베르", 12),
 		("스위칭행렬(마틴+달랑)", 13),
-		("달랑행렬", 14)
+		("달랑행렬", 14),
+		("업치기", 15)
 	};
 
 	private readonly Dictionary<int, Dictionary<(int Row, int Col), decimal>> _matrixCellsCacheByType = MatrixBetAmountTypes.ToDictionary((int t) => t, (int _) => new Dictionary<(int, int), decimal>());
@@ -163,10 +183,10 @@ public partial class BetAmountSettingForm : Form
 		_ = 1;
 		try
 		{
-			int[] allTypes = new int[11]
+			int[] allTypes = new int[12]
 			{
 				0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-				10
+				10, 15
 			};
 			int[] array = allTypes;
 			foreach (int type in array)
@@ -306,6 +326,14 @@ public partial class BetAmountSettingForm : Form
 						if (bettingMethod.HasValue && bettingMethod.GetValueOrDefault() > 0)
 						{
 							_oscarTargetUnitsCache = setting.BettingMethod.Value;
+						}
+					}
+					if (type == 15 && setting.Number == 1)
+					{
+						int? upBm = setting.BettingMethod;
+						if (upBm.HasValue && upBm.GetValueOrDefault() > 0)
+						{
+							_upchigiStepCountCache = setting.BettingMethod.Value;
 						}
 					}
 					if (type == 9 && setting.Number == 1)
@@ -492,6 +520,69 @@ public partial class BetAmountSettingForm : Form
 		dgvBetAmounts.Bounds = new Rectangle(_gridDefaultBounds.Left, top, _gridDefaultBounds.Width, height);
 	}
 
+	// 업치기 설정 패널(단계수/시작금액/일정금액/합산수익)을 Designer 수정 없이 런타임 생성.
+	// pnlFlatBetting과 같은 자리(12,50)에 올리고, 다른 스칼라 패널들처럼 보이기/숨기기로 전환한다.
+	private void EnsureUpchigiPanel()
+	{
+		if (_pnlUpchigi != null)
+		{
+			return;
+		}
+		_pnlUpchigi = new Panel
+		{
+			Name = "pnlUpchigi",
+			Location = new Point(12, 50),
+			Size = new Size(564, 475),
+			Visible = false,
+			BackColor = pnlFlatBetting.BackColor,
+			ForeColor = pnlFlatBetting.ForeColor
+		};
+		int y = 10;
+		_txtUpchigiStep = AddUpchigiRow("단계 수(N)", ref y);
+		_txtUpchigiStart = AddUpchigiRow("시작금액", ref y);
+		_txtUpchigiFlat = AddUpchigiRow("일정금액", ref y);
+		_txtUpchigiThreshold = AddUpchigiRow("합산수익", ref y);
+		_txtUpchigiFailThreshold = AddUpchigiRow("누적실패 임계", ref y);
+		_txtUpchigiMultiplier = AddUpchigiRow("실패 시 배수", ref y);
+		_txtUpchigiMaxMultiplier = AddUpchigiRow("배수 상한", ref y);
+		Label info = new Label
+		{
+			AutoSize = false,
+			Location = new Point(8, y + 8),
+			Size = new Size(548, 210),
+			ForeColor = pnlFlatBetting.ForeColor,
+			Text = "※ 서식 매칭 시 시작금액으로 시작 → 당첨하면 그 금액의 ×2로 자동 업치기(대상 동일, 서식 재확인 없음). 업치기 중 미당첨이면 1단계(시작금액)로 초기화.\r\n※ N단계 완주 후: 일정금액이 설정돼 있으면 일정금액으로 베팅하며, 당첨이면 일정베팅 유지, 미당첨(실패)이면 1단계로 초기화해 업치기를 다시 시작합니다. 일정금액을 비우면 일정베팅 없이 바로 1단계부터 업치기 재시작.\r\n※ 합산수익(=전체 목표): 돌리는 모든 방의 합산 순손익이 이 값을 넘으면 — 즉 전체 실패금액을 다 메우고 합산수익만큼 더 벌면 — 단계와 상관없이 모든 방을 1단계로 초기화합니다. (0=미사용)\r\n※ 누적 미당첨(업치기 단계·일정베팅 모두 포함)이 임계에 도달하면 그 방의 시작금액과 일정금액을 함께 '실패 시 배수'만큼 올립니다(×2→×4…, 방마다 따로). '배수 상한'까지만 오르고, 전체 합산수익 리셋 시 ×1로 복귀. (임계 0 또는 배수 1 이하=미사용, 배수 상한 0/빈칸=무제한)"
+		};
+		_pnlUpchigi.Controls.Add(info);
+		base.Controls.Add(_pnlUpchigi);
+		_pnlUpchigi.BringToFront();
+	}
+
+	private TextBox AddUpchigiRow(string label, ref int y)
+	{
+		Label lbl = new Label
+		{
+			Text = label,
+			AutoSize = false,
+			Location = new Point(8, y + 4),
+			Size = new Size(95, 24),
+			ForeColor = pnlFlatBetting.ForeColor
+		};
+		TextBox box = new TextBox
+		{
+			Location = new Point(108, y),
+			Size = new Size(200, 27),
+			BackColor = txtFlatAmount.BackColor,
+			ForeColor = txtFlatAmount.ForeColor,
+			BorderStyle = txtFlatAmount.BorderStyle,
+			Font = txtFlatAmount.Font
+		};
+		_pnlUpchigi!.Controls.Add(lbl);
+		_pnlUpchigi!.Controls.Add(box);
+		y += 34;
+		return box;
+	}
+
 	private void DisplayTypeData(int betAmountType)
 	{
 		dgvBetAmounts.Rows.Clear();
@@ -504,6 +595,10 @@ public partial class BetAmountSettingForm : Form
 		pnlDalmenzing.Visible = false;
 		pnlMatrix.Visible = false;
 		pnlHkAutoFill.Visible = false;
+		if (_pnlUpchigi != null)
+		{
+			_pnlUpchigi.Visible = false;
+		}
 
 		// The mixed-mode overlay, the save button and the caption used to be reset only inside the
 		// default branch. Every other strategy has its own case (and the matrix types return early),
@@ -635,6 +730,29 @@ public partial class BetAmountSettingForm : Form
 			pnlFlatBetting.Visible = true;
 			decimal? baseAmount = _typeDataCache.GetValueOrDefault(8)?.GetValueOrDefault(1);
 			txtFlatAmount.Text = ((baseAmount.HasValue && baseAmount.Value > 0m) ? baseAmount.Value.ToString("N0") : "");
+			break;
+		}
+		case 15:
+		{
+			dgvBetAmounts.Visible = false;
+			pnlBulkSet.Visible = false;
+			EnsureUpchigiPanel();
+			_pnlUpchigi.Visible = true;
+			_pnlUpchigi.BringToFront();
+			Dictionary<int, decimal?> up = _typeDataCache.GetValueOrDefault(15) ?? new Dictionary<int, decimal?>();
+			_txtUpchigiStep.Text = ((_upchigiStepCountCache > 0) ? _upchigiStepCountCache.ToString() : "");
+			decimal? upStart = up.GetValueOrDefault(1);
+			decimal? upFlat = up.GetValueOrDefault(2);
+			decimal? upThreshold = up.GetValueOrDefault(3);
+			_txtUpchigiStart.Text = ((upStart.HasValue && upStart.Value > 0m) ? upStart.Value.ToString("N0") : "");
+			_txtUpchigiFlat.Text = ((upFlat.HasValue && upFlat.Value > 0m) ? upFlat.Value.ToString("N0") : "");
+			_txtUpchigiThreshold.Text = ((upThreshold.HasValue && upThreshold.Value > 0m) ? upThreshold.Value.ToString("N0") : "");
+			decimal? upFailThr = up.GetValueOrDefault(4);
+			decimal? upMult = up.GetValueOrDefault(5);
+			decimal? upMaxMult = up.GetValueOrDefault(6);
+			_txtUpchigiFailThreshold.Text = ((upFailThr.HasValue && upFailThr.Value > 0m) ? upFailThr.Value.ToString("N0") : "");
+			_txtUpchigiMultiplier.Text = ((upMult.HasValue && upMult.Value > 1m) ? upMult.Value.ToString("0.##") : "");
+			_txtUpchigiMaxMultiplier.Text = ((upMaxMult.HasValue && upMaxMult.Value > 1m) ? upMaxMult.Value.ToString("0.##") : "");
 			break;
 		}
 		case 9:
@@ -804,6 +922,38 @@ public partial class BetAmountSettingForm : Form
 				dict8[1] = baseAmount4;
 			}
 			_typeDataCache[8] = dict8;
+			return;
+		}
+		if (_currentBetAmountType == 15)
+		{
+			// Number 1=시작금액, 2=일정금액, 3=합산수익; 단계수 N은 _upchigiStepCountCache(저장 시 Number1의 BettingMethod로).
+			Dictionary<int, decimal?> dict15 = new Dictionary<int, decimal?>();
+			if (_txtUpchigiStart != null && decimal.TryParse(_txtUpchigiStart.Text.Replace(",", "").Trim(), out var upStartVal) && upStartVal > 0m)
+			{
+				dict15[1] = upStartVal;
+			}
+			if (_txtUpchigiFlat != null && decimal.TryParse(_txtUpchigiFlat.Text.Replace(",", "").Trim(), out var upFlatVal) && upFlatVal > 0m)
+			{
+				dict15[2] = upFlatVal;
+			}
+			if (_txtUpchigiThreshold != null && decimal.TryParse(_txtUpchigiThreshold.Text.Replace(",", "").Trim(), out var upThrVal) && upThrVal > 0m)
+			{
+				dict15[3] = upThrVal;
+			}
+			if (_txtUpchigiFailThreshold != null && decimal.TryParse(_txtUpchigiFailThreshold.Text.Replace(",", "").Trim(), out var upFailThrVal) && upFailThrVal > 0m)
+			{
+				dict15[4] = upFailThrVal;
+			}
+			if (_txtUpchigiMultiplier != null && decimal.TryParse(_txtUpchigiMultiplier.Text.Replace(",", "").Trim(), out var upMultVal) && upMultVal > 1m)
+			{
+				dict15[5] = upMultVal;
+			}
+			if (_txtUpchigiMaxMultiplier != null && decimal.TryParse(_txtUpchigiMaxMultiplier.Text.Replace(",", "").Trim(), out var upMaxMultVal) && upMaxMultVal > 1m)
+			{
+				dict15[6] = upMaxMultVal;
+			}
+			_typeDataCache[15] = dict15;
+			_upchigiStepCountCache = ((_txtUpchigiStep != null && int.TryParse(_txtUpchigiStep.Text.Trim(), out var upN) && upN > 0) ? upN : 1);
 			return;
 		}
 		if (_currentBetAmountType == 9)
@@ -1394,10 +1544,10 @@ public partial class BetAmountSettingForm : Form
 					saveTasks.Add(api.SaveMatrixRowRulesAsync(matrixRowRuleDtos, type));
 				}
 			}
-			int[] saveTypes = new int[11]
+			int[] saveTypes = new int[12]
 			{
 				0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-				10
+				10, 15
 			};
 			matrixBetAmountTypes = saveTypes;
 			foreach (int type2 in matrixBetAmountTypes)
@@ -1446,6 +1596,13 @@ public partial class BetAmountSettingForm : Form
 						[2] = (0m, _dalmenzingRecoveryMethodCache)
 					};
 					saveTasks.Add(_betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, dalmenzingData, 10));
+					break;
+				}
+				case 15:
+				{
+					// Number1=시작금액(+ BettingMethod=단계수 N), 2=일정금액, 3=합산수익, 4=누적실패 임계, 5=실패 시 배수, 6=배수 상한
+					Dictionary<int, (decimal?, int?)> upchigiData = data.ToDictionary((KeyValuePair<int, decimal?> kv) => kv.Key, (KeyValuePair<int, decimal?> kv) => (Value: kv.Value, (kv.Key == 1) ? new int?(_upchigiStepCountCache) : ((int?)null)));
+					saveTasks.Add(_betAmountSettingService.SaveMartinDAlembertBetAmountsAsync(_userId, upchigiData, 15));
 					break;
 				}
 				default:

@@ -217,7 +217,7 @@ public partial class Form1 : Form
 	/// PragmaticAutoBettingService handles all fifteen and BetAmountSettingForm can edit all fifteen,
 	/// which left ten working strategies unreachable. Names match GetBetAmountTypeName.
 	/// </summary>
-	private static readonly (string Name, int Type)[] BetAmountOptions = new(string, int)[15]
+	private static readonly (string Name, int Type)[] BetAmountOptions = new(string, int)[16]
 	{
 		("마틴", 0),
 		("홍콩크루즈", 1),
@@ -233,7 +233,8 @@ public partial class Form1 : Form
 		("행렬", 11),
 		("행렬달랑베르", 12),
 		("스위칭행렬(마틴+달랑)", 13),
-		("달랑행렬", 14)
+		("달랑행렬", 14),
+		("업치기", 15)
 	};
 
 	private IContainer components;

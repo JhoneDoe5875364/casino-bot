@@ -8,6 +8,7 @@ using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
 using Fleck;
@@ -89,10 +90,44 @@ public class PragmaticWebSocketServer : IDisposable
 
 	public event EventHandler<(string CapturedUrl, List<string> RegisteredDomains)>? DomainMismatchDetected;
 
+	// 자기 자신이 전에 접속했던 사이트(필터)가, 지금 붙어있는 새 사이트와 달라서 한 번도 안
+	// 잡히는 잔여 케이스용 워치독. SetGameDomains 로 넣은 필터값이 바뀌지 않았는데 일정 시간 지나도
+	// 캡처가 안 되면, 필터를 비워 "전체 캡처"로 한 번 더 시도한다(inject.js 가 이미 추적 중이던
+	// 소켓을 소급 캡처 — 페이지 새로고침 불필요). 세대 번호로, 그 사이 다른 SetGameDomains 호출이나
+	// 정상 캡처가 있었으면 아무 것도 안 한다.
+	private int _domainFilterGeneration;
+
+	private static readonly TimeSpan EmptyFilterFallbackDelay = TimeSpan.FromSeconds(15);
+
 	public void SetGameDomains(List<string> domains)
 	{
 		_gameDomains = domains;
 		SendDomainConfigAsync();
+		ScheduleEmptyFilterFallback(domains);
+	}
+
+	private void ScheduleEmptyFilterFallback(List<string> domains)
+	{
+		if (domains == null || domains.Count == 0)
+		{
+			return;
+		}
+		int myGeneration = Interlocked.Increment(ref _domainFilterGeneration);
+		_ = Task.Run(async delegate
+		{
+			await Task.Delay(EmptyFilterFallbackDelay).ConfigureAwait(continueOnCapturedContext: false);
+			if (myGeneration != Volatile.Read(ref _domainFilterGeneration))
+			{
+				return;
+			}
+			if (IsWebSocketCaptured)
+			{
+				return;
+			}
+			FileLogger.Log($"[WebSocketServer] 기록된 도메인({string.Join(", ", domains)})으로 {EmptyFilterFallbackDelay.TotalSeconds:F0}초간 캡처되지 않음 — 필터를 비우고 전체 캡처로 재시도", "Warning", "Domain");
+			_gameDomains = new List<string>();
+			await SendDomainConfigAsync().ConfigureAwait(continueOnCapturedContext: false);
+		});
 	}
 
 	public Task<bool> SendDomainConfigAsync()

@@ -80,27 +80,32 @@ public class DomainSettingService
 		return sites;
 	}
 
+	// 예전엔 전 계정이 공유하는 DomainSettings(=GetDomainAsync) 한 줄을 읽었는데, 계정마다 다른
+	// 사이트를 쓰는 구조에서는 다른 계정이 마지막에 보고한 도메인으로 덮여 캡처 필터가 틀어졌다
+	// (예: A가 a.com으로 로그인한 직후 B가 로그인하면 B의 필터가 a.com이 되어 B의 실제 소켓은
+	// 하나도 안 걸려서 "접속 도메인"이 영원히 비게 된다). 이 계정 자신의 슬롯0(주) 기록만 쓴다.
 	public static async Task<List<string>> GetUserDomainAsync(string userId)
 	{
 		try
 		{
-			DomainSettingDto domain = await GetApi().GetDomainAsync();
-			if (string.IsNullOrEmpty(domain.WebSocketUrl))
+			List<DomainSiteDto> sites = await GetApi().GetDomainSitesAsync();
+			DomainSiteDto? mine = sites.FirstOrDefault((DomainSiteDto s) => s.SiteSlot == 0);
+			string? domain = mine?.Domain;
+			if (string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(mine?.WebSocketUrl))
 			{
-				return new List<string>();
-			}
-			try
-			{
-				Uri uri = new Uri(domain.WebSocketUrl);
-				if (!string.IsNullOrEmpty(uri.Host))
+				try
 				{
-					return new List<string>(1) { uri.Host };
+					Uri uri = new Uri(mine.WebSocketUrl);
+					if (!string.IsNullOrEmpty(uri.Host))
+					{
+						domain = uri.Host;
+					}
+				}
+				catch (UriFormatException)
+				{
 				}
 			}
-			catch (UriFormatException)
-			{
-			}
-			return new List<string>();
+			return string.IsNullOrWhiteSpace(domain) ? new List<string>() : new List<string>(1) { domain };
 		}
 		catch (Exception)
 		{
