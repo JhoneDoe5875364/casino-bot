@@ -212,7 +212,7 @@ public class PragmaticMessageParser
 				ParseTableConfigMessage(payload);
 				break;
 			case "toasterMessage":
-				FileLogger.Log("[Parser] ★ toasterMessage 수신: " + payload.GetRawText(), "Warning", "Betting");
+				FileLogger.Log("[Parser] toasterMessage 수신: " + payload.GetRawText(), "Info", "Betting");
 				break;
 			case "betValidationError":
 				ParseBetValidationErrorMessage(payload);

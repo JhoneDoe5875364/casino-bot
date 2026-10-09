@@ -170,6 +170,11 @@ public class PragmaticAutoBettingService
 	// 마감 몇 ms 전에 베팅 처리를 시작할지. 여러 방이 겹칠 때 순서대로 처리할 여유를 준다.
 	private const int BettingTargetMs = 10000;
 
+	// 패턴 적중 시 '즉시' 베팅: 창이 열리면 직전 결과 반영 여유(이 버퍼)만 두고 바로 베팅한다.
+	// 예전엔 마감 BettingTargetMs(10초) 전까지 기다려 칩이 마감 직전에 올라가고 실패가 잦았다.
+	// 이제 창 초반에 베팅하므로 전송·확인에 쓸 여유가 최대가 된다. (직전 결과 동기화는 ExecuteTimer의 방게이트 대기가 보강)
+	private const int BettingOpenSettleMs = 600;
+
 	private const int HistorySyncDeadlineMs = 3000;
 
 	private const int HistorySyncPollMs = 200;
@@ -1259,8 +1264,10 @@ public class PragmaticAutoBettingService
 		}
 		CancelBettingTimer(tableId);
 		double remainingMs = state.RemainingTimeMs;
-		double delayMs = remainingMs - BettingTargetMs;
-		if (delayMs < 0.0)
+		// 창이 열리면 작은 버퍼(직전 결과 반영)만 두고 '즉시' 베팅한다 — 처리 여유를 최대로 확보해
+		// 칩이 마감 직전에 올라가며 실패하던 문제를 없앤다. (예전: remainingMs - BettingTargetMs 로 마감 10초 전까지 대기)
+		double delayMs = BettingOpenSettleMs;
+		if (delayMs > remainingMs)
 		{
 			delayMs = 0.0;
 		}
@@ -1456,8 +1463,28 @@ public class PragmaticAutoBettingService
 		}
 		if (roomState.IsWaitingForResult)
 		{
-			FileLogger.Log("[AutoBetting] " + tableId + ": ExecuteTimer 스킵 (결과 대기 중)");
-			return;
+			// [양방향] 창이 열렸는데 직전 라운드 결과가 아직 판정되지 않았다. 즉시 스킵하면 그 라운드를 건너뛰어
+			// 단계가 빅로드보다 하나 뒤처진다(= '단계 하나 빠짐'). 그래서 이 열린 창 안에서 결과가 판정될 때까지
+			// (= IsWaitingForResult 해제) 잠깐 기다렸다가, 올라간 단계로 '이 라운드에' 베팅한다.
+			// 베팅 시간 확보를 위해 마감 ~3.5초 전까지만 대기한다.
+			DateTime waitStart = DateTime.Now;
+			while (roomState.IsWaitingForResult && !cancellationToken.IsCancellationRequested
+				&& IsRunning && state.IsBettingOpen && state.RemainingTimeMs > 3500.0)
+			{
+				try { await Task.Delay(120, cancellationToken); }
+				catch (OperationCanceledException) { return; }
+			}
+			if (roomState.IsWaitingForResult)
+			{
+				FileLogger.Log($"[AutoBetting] {tableId}: ExecuteTimer 스킵 (결과 대기 {(DateTime.Now - waitStart).TotalMilliseconds:F0}ms 후에도 미판정)");
+				return;
+			}
+			FileLogger.Log($"[AutoBetting] {tableId}: 결과 대기 {(DateTime.Now - waitStart).TotalMilliseconds:F0}ms 후 판정 완료 → 같은 라운드에 단계={roomState.CurrentStep} 진행");
+			if (!IsRunning || cancellationToken.IsCancellationRequested || _isPaused || _isCycleResting
+				|| _isProfitCoolingDown || _isMatrixResting || !state.IsBettingOpen || roomState.IsRequestInFlight)
+			{
+				return;
+			}
 		}
 		int? maxActiveBettingRooms = Context.MaxActiveBettingRooms;
 		if (maxActiveBettingRooms.HasValue && maxActiveBettingRooms.GetValueOrDefault() > 0 && roomState.CurrentStep == 1 && !roomState.IsWaitingForResult)

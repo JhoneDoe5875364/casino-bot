@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Text.Json;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,15 +17,11 @@ public class PragmaticBettingService
 
 	private readonly object _tcsLock = new object();
 
-	private long _currentBetAttemptId;
+	private TaskCompletionSource<bool>? _betResultTcs;   // Extension ack (단일, best-effort — fix A로 200ms만 대기 후 진행)
 
-	private long _activeBetAttemptId;
-
-	private TaskCompletionSource<bool>? _betResultTcs;
-
-	private TaskCompletionSource<bool>? _ppBetConfirmTcs;
-
-	private TaskCompletionSource<bool>? _previousPpBetConfirmTcs;
+	// PP 베팅 확인(★ bet)/반려를 '방별'로 라우팅한다. 멀티방 동시 베팅에서 각 방이 자기 확인만 기다리게 한다.
+	// (예전엔 단일 _ppBetConfirmTcs 하나라 방B가 방A의 확인을 가로채는 경쟁이 있었다 — 멀티방 핵심 버그.)
+	private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _ppConfirmByTable = new ConcurrentDictionary<string, TaskCompletionSource<bool>>(StringComparer.OrdinalIgnoreCase);
 
 	private const int ExtensionTimeoutMs = 5000;
 
@@ -48,9 +45,8 @@ public class PragmaticBettingService
 
 	private static readonly HashSet<string> KnownBetCodes = new HashSet<string>(StringComparer.Ordinal) { "0", "1", "10", "11" };
 
-	private string? _inFlightTableId;
-
-	private string? _inFlightBetCode;
+	// 방별 '현재 대기 중인 베팅 코드' — 반려 필터링용(그 방의 지난 코드 반려는 무시).
+	private readonly ConcurrentDictionary<string, string> _inFlightBetCodeByTable = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
 	public event EventHandler<decimal>? BetAmountConfirmed;
 
@@ -82,91 +78,65 @@ public class PragmaticBettingService
 	private void OnPpBetValidationError(object? sender, PpBetValidationErrorArgs args)
 	{
 		string cause = (args.IsCommissionCodeRejected ? " [1057: 노커미션 방에 커미션 코드]" : (args.IsNoCommissionCodeRejected ? " [1058: 커미션 방에 노커미션 코드]" : (args.IsBelowTableMinimum ? " [1013: 최소 한도 미달 — 1057/1058의 후속 증상일 수 있음]" : "")));
-		lock (_tcsLock)
+		// 방별 라우팅: 반려가 온 방에 '대기 중인 베팅'이 있을 때만 그 방의 TCS를 실패로 종료한다.
+		if (string.IsNullOrEmpty(args.TableId) || !_ppConfirmByTable.TryGetValue(args.TableId, out var tcs))
 		{
-			if (string.IsNullOrEmpty(_inFlightTableId))
-			{
-				FileLogger.Log($"[PpBetting] {args.TableId}: 반려 {args.Code} 수신(대기 중인 베팅 없음 → 상태 변경 없음){cause}", "Warning", "Betting");
-			}
-			else if (!string.IsNullOrEmpty(args.TableId) && !string.Equals(args.TableId, _inFlightTableId, StringComparison.OrdinalIgnoreCase))
-			{
-				FileLogger.Log($"[PpBetting] 다른 방({args.TableId})의 반려 {args.Code} 무시{cause} — 현재 대기 중인 방은 {_inFlightTableId}", "Info", "Betting");
-			}
-			else if (KnownBetCodes.Contains(args.BetCode) && !string.IsNullOrEmpty(_inFlightBetCode) && !string.Equals(args.BetCode, _inFlightBetCode, StringComparison.Ordinal))
-			{
-				FileLogger.Log($"[PpBetting] {args.TableId}: 지난 코드(betCode={args.BetCode})에 대한 반려 {args.Code} 무시 — 현재 대기 중인 코드는 {_inFlightBetCode}", "Info", "Betting");
-			}
-			else
-			{
-				FileLogger.Log($"[PpBetting] ✗ {args.TableId}: PP 반려 통보 → 대기 즉시 종료 (code={args.Code}, desc={args.Description}, amount={args.Amount:N0}, betCode={args.BetCode}){cause}", "Warning", "Betting");
-				_ppBetConfirmTcs?.TrySetResult(result: false);
-			}
+			FileLogger.Log($"[PpBetting] {args.TableId}: 반려 {args.Code} 수신(그 방 대기 베팅 없음 → 무시){cause}", "Info", "Betting");
+			return;
 		}
+		if (KnownBetCodes.Contains(args.BetCode) && _inFlightBetCodeByTable.TryGetValue(args.TableId, out var inflightCode) && !string.Equals(args.BetCode, inflightCode, StringComparison.Ordinal))
+		{
+			FileLogger.Log($"[PpBetting] {args.TableId}: 지난 코드(betCode={args.BetCode})에 대한 반려 {args.Code} 무시 — 현재 대기 코드는 {inflightCode}", "Info", "Betting");
+			return;
+		}
+		FileLogger.Log($"[PpBetting] ✗ {args.TableId}: PP 반려 통보 → 대기 즉시 종료 (code={args.Code}, desc={args.Description}, amount={args.Amount:N0}, betCode={args.BetCode}){cause}", "Warning", "Betting");
+		tcs.TrySetResult(result: false);
 	}
 
 	private void OnBetResultReceived(object? sender, bool success)
 	{
-		lock (_tcsLock)
-		{
-			if (_currentBetAttemptId == _activeBetAttemptId)
-			{
-				_betResultTcs?.TrySetResult(success);
-			}
-		}
+		// Extension ack(테이블 정보 없음) — 단일 best-effort. fix A로 어차피 200ms만 기다리고 진행한다.
+		_betResultTcs?.TrySetResult(success);
 	}
 
 	private void OnPpBetConfirmed(object? sender, PpBetConfirmArgs args)
 	{
-		lock (_tcsLock)
+		// 방별 라우팅: 확인이 온 방의 TCS만 완료시킨다. 대기 중이 아니면(이미 끝났거나 다른 방) 무시.
+		if (string.IsNullOrEmpty(args.TableId) || !_ppConfirmByTable.TryGetValue(args.TableId, out var tcs))
 		{
-			if (_currentBetAttemptId == _activeBetAttemptId)
-			{
-				if (args.IsConfirmed)
-				{
-					FileLogger.Log($"[PpBetting] ★ bet 확인 수신: amount={args.Amount}, betcode={args.BetCode}");
-					BetAmountConfirmed?.Invoke(this, args.Amount);
-					_ppBetConfirmTcs?.TrySetResult(result: true);
-				}
-				else
-				{
-					FileLogger.Log($"[PpBetting] ✗ bet 거절 수신: bc=false, amount={args.Amount}, betcode={args.BetCode}", "Warning", "Betting");
-					_ppBetConfirmTcs?.TrySetResult(result: false);
-				}
-			}
-			else
-			{
-				FileLogger.Log($"[PpBetting] 지연 bet 수신 → 이전 TCS에 전달: confirmed={args.IsConfirmed}, amount={args.Amount}");
-				if (args.IsConfirmed)
-				{
-					BetAmountConfirmed?.Invoke(this, args.Amount);
-				}
-				_previousPpBetConfirmTcs?.TrySetResult(args.IsConfirmed);
-			}
+			FileLogger.Log($"[PpBetting] bet 확인 수신(그 방 대기 베팅 없음: {args.TableId}) 무시: confirmed={args.IsConfirmed}, amount={args.Amount}");
+			return;
+		}
+		if (args.IsConfirmed)
+		{
+			FileLogger.Log($"[PpBetting] ★ {args.TableId} bet 확인 수신: amount={args.Amount}, betcode={args.BetCode}");
+			BetAmountConfirmed?.Invoke(this, args.Amount);
+			tcs.TrySetResult(result: true);
+		}
+		else
+		{
+			FileLogger.Log($"[PpBetting] ✗ {args.TableId} bet 거절 수신: bc=false, amount={args.Amount}, betcode={args.BetCode}", "Warning", "Betting");
+			tcs.TrySetResult(result: false);
 		}
 	}
 
 	private void OnPpBetsConfirmed(object? sender, PpBetsConfirmArgs args)
 	{
-		lock (_tcsLock)
+		// 방별 라우팅.
+		if (string.IsNullOrEmpty(args.TableId) || !_ppConfirmByTable.TryGetValue(args.TableId, out var tcs))
 		{
-			if (_currentBetAttemptId == _activeBetAttemptId)
-			{
-				if (args.IsConfirmed)
-				{
-					FileLogger.Log($"[PpBetting] ★ bets 확인 수신: {args.Bets.Count}건");
-					_ppBetConfirmTcs?.TrySetResult(result: true);
-				}
-				else
-				{
-					FileLogger.Log($"[PpBetting] ✗ bets 거절 수신: bc=false, {args.Bets.Count}건", "Warning", "Betting");
-					_ppBetConfirmTcs?.TrySetResult(result: false);
-				}
-			}
-			else
-			{
-				FileLogger.Log($"[PpBetting] 지연 bets 수신 → 이전 TCS에 전달: confirmed={args.IsConfirmed}, {args.Bets.Count}건");
-				_previousPpBetConfirmTcs?.TrySetResult(args.IsConfirmed);
-			}
+			FileLogger.Log($"[PpBetting] bets 확인 수신(그 방 대기 베팅 없음: {args.TableId}) 무시: confirmed={args.IsConfirmed}, {args.Bets.Count}건");
+			return;
+		}
+		if (args.IsConfirmed)
+		{
+			FileLogger.Log($"[PpBetting] ★ {args.TableId} bets 확인 수신: {args.Bets.Count}건");
+			tcs.TrySetResult(result: true);
+		}
+		else
+		{
+			FileLogger.Log($"[PpBetting] ✗ {args.TableId} bets 거절 수신: bc=false, {args.Bets.Count}건", "Warning", "Betting");
+			tcs.TrySetResult(result: false);
 		}
 	}
 
@@ -436,15 +406,12 @@ public class PragmaticBettingService
 							return BetResult.Fail("베팅이 마감되었습니다.");
 						}
 					}
-					lock (_tcsLock)
-					{
-						_previousPpBetConfirmTcs = _ppBetConfirmTcs;
-						_activeBetAttemptId = Interlocked.Increment(ref _currentBetAttemptId);
-						_betResultTcs = new TaskCompletionSource<bool>();
-						_ppBetConfirmTcs = new TaskCompletionSource<bool>();
-						_inFlightTableId = tableState.TableId;
-						_inFlightBetCode = ResolveBetCode(betType);
-					}
+					// 이 방의 확인 TCS를 '방별 딕셔너리'에 새로 등록하고, 아래에서 로컬 참조(ppConfirmTcs)로 대기한다.
+					// 다른 방이 동시에 베팅해도 서로의 TCS를 덮어쓰지 않아, 확인이 엉뚱한 방으로 가지 않는다.
+					var ppConfirmTcs = new TaskCompletionSource<bool>();
+					_betResultTcs = new TaskCompletionSource<bool>();   // Extension ack(단일, best-effort)
+					_ppConfirmByTable[tableState.TableId] = ppConfirmTcs;
+					_inFlightBetCodeByTable[tableState.TableId] = ResolveBetCode(betType);
 					_wsServer.SendSnapshotBeforeBetAsync();
 					Task<bool> extTask = _wsServer.SendBetMessageAsync(xmlMessage);
 					Task<bool> cdpTask = ((_cdpService != null) ? _cdpService.SendBetDirectAsync(xmlMessage) : Task.FromResult(result: false));
@@ -464,7 +431,9 @@ public class PragmaticBettingService
 					{
 						FileLogger.Log("[PpBetting] Extension 실패 → CDP 경로로 전송 성공");
 					}
-					bool? sendResult = await WaitWithTimeoutAsync(_betResultTcs.Task, 5000);
+					// CDP로 이미 전송됐으면 Extension ack(_betResultTcs)를 5초나 기다릴 필요 없음 — 순수 낭비(처리시간 ~5초 단축).
+					// 에볼루션은 위에서 별도 메서드로 return 되어 이 PragmaticPlay 경로에 오지 않으므로 영향 없음.
+					bool? sendResult = await WaitWithTimeoutAsync(_betResultTcs.Task, cdpSent ? 200 : 5000);
 					if (!sendResult.HasValue)
 					{
 						if (cdpSent)
@@ -490,11 +459,11 @@ public class PragmaticBettingService
 						await _wsServer.SendSnapshotAfterBetAsync(amount);
 					});
 					int dynamicTimeout = GetDynamicTimeout(tableState);
-					bool? ppResult = await WaitWithTimeoutAsync(_ppBetConfirmTcs.Task, dynamicTimeout);
+					bool? ppResult = await WaitWithTimeoutAsync(ppConfirmTcs.Task, dynamicTimeout);
 					if (!ppResult.HasValue)
 					{
 						FileLogger.Log($"[PpBetting] PP 타임아웃({dynamicTimeout}ms) → Grace Period {1500}ms 추가 대기");
-						ppResult = await WaitWithTimeoutAsync(_ppBetConfirmTcs.Task, 1500);
+						ppResult = await WaitWithTimeoutAsync(ppConfirmTcs.Task, 1500);
 						if (ppResult.HasValue)
 						{
 							FileLogger.Log($"[PpBetting] ★ Grace Period 내 확인 수신! (result={ppResult.Value})");
@@ -502,7 +471,7 @@ public class PragmaticBettingService
 					}
 					if (!ppResult.HasValue)
 					{
-						TaskCompletionSource<bool> capturedTcs = _ppBetConfirmTcs;
+						TaskCompletionSource<bool> capturedTcs = ppConfirmTcs;
 						Task.Run(async delegate
 						{
 							try
@@ -527,8 +496,8 @@ public class PragmaticBettingService
 								FileLogger.Log("[PpBetting] 비동기 후속 오류: " + ex2.Message, "Warning", "Betting");
 							}
 						});
-						FileLogger.Log("[PpBetting] PP 서버 응답 타임아웃+Grace → 미확인 반환 (비동기 관찰 시작)", "Warning", "Betting");
-						return BetResult.Unconfirmed(xmlMessage);
+						FileLogger.Log("[PpBetting] PP 서버 확인 미수신(마감까지 대기 후) → 미접수=실패 처리 (로그만, 어디에도 미반영)", "Warning", "Betting");
+						return BetResult.Fail("PP 서버 확인 미수신 — 미접수로 처리(이력·회계·단계 미반영)");
 					}
 					if (ppResult.Value)
 					{
@@ -553,11 +522,9 @@ public class PragmaticBettingService
 		}
 		finally
 		{
-			lock (_tcsLock)
-			{
-				_inFlightTableId = null;
-				_inFlightBetCode = null;
-			}
+			// 이 방의 대기 엔트리 정리 (다음 베팅/늦은 메시지가 깨끗하게 처리되도록).
+			_ppConfirmByTable.TryRemove(tableState.TableId, out _);
+			_inFlightBetCodeByTable.TryRemove(tableState.TableId, out _);
 		}
 	}
 
@@ -580,6 +547,11 @@ public class PragmaticBettingService
 
 	private int GetDynamicTimeout(TableState tableState)
 	{
-		return Math.Clamp((int)(tableState.RemainingTimeMs - 50.0), 1000, 8000);
+		// 이 사이트는 베팅 확인(★ bet)이 '창 마감 시점'에 온다(전송 ~12초 뒤). 그래서 마감까지 + 여유(3초)를
+		// 기다려야 등록된 베팅의 확인을 받는다. 끝내 확인이 안 오면 호출부에서 '미접수=실패'로 처리한다.
+		// (예전엔 8초로 잘라서 마감 때 오는 확인을 못 받고 '미확인'으로 성공 간주했다.)
+		// 상한 16초는 베팅창이 ~16초인 테이블(예: BACCARAT_2)에서 확인이 16.4초에 와 유예(1.5초)로 간신히
+		// 잡히며 그 방을 다음 창까지 붙잡아 라운드를 건너뛰게 했다. 20초로 올려 확인을 제때 받고 방을 빨리 푼다.
+		return Math.Clamp((int)(tableState.RemainingTimeMs + 3000.0), 2000, 20000);
 	}
 }

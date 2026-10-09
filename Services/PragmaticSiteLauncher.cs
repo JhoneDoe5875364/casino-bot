@@ -107,6 +107,9 @@ public static class PragmaticSiteLauncher
 			"--load-extension=\"" + loadArg + "\"",
 			"--no-first-run",
 			"--no-default-browser-check",
+			// 라이브 바카라 테이블마다 오디오 스트림을 디코딩하지 않도록 음소거 — 베팅은 데이터 소켓으로
+			// 하므로 소리는 불필요하고, 테이블이 많을수록 CPU 절감이 크다.
+			"--mute-audio",
 			// content.js -> ws://127.0.0.1 릴레이가 Chrome의 Local/Private Network Access 정책에
 			// 막히는 것(ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS) 방지
 			"--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults"

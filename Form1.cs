@@ -2103,6 +2103,12 @@ public partial class Form1 : Form
 			});
 			return;
 		}
+		// 실패(미접수)는 AutoBettingService 가 이미 '실패' 로그를 남긴다. UI 이력 그리드·단계 표시 등
+		// 어디에도 반영하지 않는다 — 실제로 사이트에 안 걸린 베팅이므로 '로그만' 남기고 무시한다.
+		if (!e.IsSuccess)
+		{
+			return;
+		}
 		if (e.IsSuccess)
 		{
 			string newText = _autoBettingService.Context.TotalBetAmount.ToString("N0");

@@ -13,6 +13,22 @@ internal static class Program
 	[STAThread]
 	private static void Main()
 	{
+		// 파일 로깅 on/off 는 appsettings.json 의 "FileLogging" 으로 정한다(기본 on). 첫 로그보다 먼저 반영.
+		try { FileLogSink.Enabled = AppConfiguration.FileLogging; } catch { }
+
+		// 스레드풀 기아 방지 (베팅 지연의 근본 원인 제거).
+		// 다수 테이블의 WebSocket 수신 파싱 + WinForms UI 갱신 + 방별 베팅 Task.Run 이 동시에 스레드풀을
+		// 점유하면, 기본 min(코어 수)으로는 새 스레드를 약 500ms에 1개씩만 늘려 Task.Delay(베팅 타이머)와
+		// 전송 continuation 이 제때 깨어나지 못한다 → 베팅이 늦게 들어가거나 누락된다.
+		// min 워커/IO 스레드를 넉넉히 미리 확보해 즉시 스케줄되게 한다.
+		int minThreads = Math.Max(64, Environment.ProcessorCount * 8);
+		ThreadPool.GetMinThreads(out int curWorker, out int curIo);
+		int wantWorker = Math.Max(curWorker, minThreads);
+		int wantIo = Math.Max(curIo, minThreads);
+		bool poolOk = ThreadPool.SetMinThreads(wantWorker, wantIo);
+		FileLogger.Log($"[시작] ThreadPool MinThreads 설정: worker {curWorker}→{wantWorker}, io {curIo}→{wantIo} (적용={poolOk}, 코어={Environment.ProcessorCount})", "Info", "Startup");
+		FileLogger.Log($"[시작] 파일 로그 기록 위치: {System.IO.Path.Combine(AppContext.BaseDirectory, "Logs")} (bot_YYYYMMDD_NNN.log, 100KB마다 새 파일)", "Info", "Startup");
+
 		SyncfusionLicenseProvider.RegisterLicense("Ngo9BigBOggjGyl/VkR+XU9Ff1RDX3xKf0x/TGpQb19xflBPallYVBYiSV9jS3hTd0ViW31fdHVQQGReVU91XQ==");
 		RegisterGlobalExceptionHandlers();
 		ApplicationConfiguration.Initialize();
@@ -30,6 +46,11 @@ internal static class Program
 		catch (Exception ex)
 		{
 			MessageBox.Show("Form1 로드 오류:\n" + ex.Message + "\n\n" + ex.StackTrace, "오류", MessageBoxButtons.OK, MessageBoxIcon.Hand);
+		}
+		finally
+		{
+			// 종료 시 큐에 남은 로그를 디스크로 마저 떨군다(마지막 라인 유실 방지).
+			FileLogSink.FlushNow();
 		}
 	}
 

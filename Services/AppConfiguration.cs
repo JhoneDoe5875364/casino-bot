@@ -31,4 +31,11 @@ public static class AppConfiguration
 	/// </summary>
 	public static bool UseEvolutionExtensionBet =>
 		string.Equals(Configuration["EvolutionBetMode"], "extension", StringComparison.OrdinalIgnoreCase);
+
+	/// <summary>
+	/// 로컬 파일 로그 기록 여부. appsettings.json 의 "FileLogging" 으로 바꾼다.
+	/// 기본은 켜짐(항목이 없거나 값이 이상하면 true). "false" 로 두면 파일에 로그를 떨구지 않는다.
+	/// </summary>
+	public static bool FileLogging =>
+		!bool.TryParse(Configuration["FileLogging"], out bool on) || on;
 }

@@ -736,7 +736,7 @@ public class PragmaticChromeDevToolsService : IPragmaticChromeDevToolsService, I
 							// here — otherwise there is no way to see what was actually bet.
 							if (status.EndsWith("+enc", StringComparison.Ordinal))
 							{
-								FileLogger.Log("[CDP][송신명령·암호화] " + Truncate(betXml, 1200), "Warning", "Betting");
+								FileLogger.Log("[CDP][송신명령·암호화] " + Truncate(betXml, 1200), "Info", "Betting");
 							}
 							return;
 						}
@@ -2204,10 +2204,12 @@ public class PragmaticChromeDevToolsService : IPragmaticChromeDevToolsService, I
 			// and they are rare — the 1-in-100 sampling below reliably misses them. Log them in full.
 			if (direction == "send" && IsGameCommandFrame(decodedData))
 			{
-				FileLogger.Log("[CDP][송신명령] " + Truncate(decodedData, 1200), "Warning", "Betting");
+				FileLogger.Log("[CDP][송신명령] " + Truncate(decodedData, 1200), "Info", "Betting");
 			}
 
-			if ((count <= 20 || count % 100 == 0) | inBetWindow)
+			// 베팅 창 동안 매 프레임(betstats 스트림)을 찍던 것을 제거 — 진단 모드에서 이 홍수가 로그 큐(1000건)를
+			// 꽉 채워 [베팅시간] 등 유용한 로그를 밀어냈고, 그 자체로도 부하였다. 이제 주기적 샘플만 남긴다.
+			if (count <= 20 || count % 100 == 0)
 			{
 				int max = (inBetWindow ? 700 : 200);
 				string preview = ((decodedData.Length > max) ? (decodedData.Substring(0, max) + "...") : decodedData);
