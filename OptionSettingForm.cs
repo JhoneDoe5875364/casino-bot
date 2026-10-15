@@ -78,6 +78,10 @@ public partial class OptionSettingForm : Form
 		string splitText = ((_state.SplitCount <= 1) ? null : _state.SplitCount.ToString());
 		int splitIndex = ((splitText != null) ? cmbBetSplit.Items.IndexOf(splitText) : 0);
 		cmbBetSplit.SelectedIndex = ((splitIndex >= 0) ? splitIndex : 0);
+		decimal limit = (_state.PerSiteLimit >= 10000m ? _state.PerSiteLimit : 5000000m);
+		nudPerSiteLimit.Value = Math.Max(nudPerSiteLimit.Minimum, Math.Min(nudPerSiteLimit.Maximum, limit));
+		decimal splitStart = (_state.SplitThreshold >= 10000m ? _state.SplitThreshold : 40000m);
+		nudSplitStart.Value = Math.Max(nudSplitStart.Minimum, Math.Min(nudSplitStart.Maximum, splitStart));
 		ApplyControlAvailability();
 	}
 
@@ -132,7 +136,9 @@ public partial class OptionSettingForm : Form
 			ShoeControlIndex = cmbShoeControl.SelectedIndex,
 			StepAlarm = chkStepAlarm.Checked,
 			StepAlarmIndex = cmbStepAlarm.SelectedIndex,
-			SplitCount = ParseSplitCount()
+			SplitCount = ParseSplitCount(),
+			PerSiteLimit = nudPerSiteLimit.Value,
+			SplitThreshold = nudSplitStart.Value
 		};
 		base.DialogResult = DialogResult.OK;
 		Close();

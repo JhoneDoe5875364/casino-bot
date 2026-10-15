@@ -38,4 +38,12 @@ public static class AppConfiguration
 	/// </summary>
 	public static bool FileLogging =>
 		!bool.TryParse(Configuration["FileLogging"], out bool on) || on;
+
+	/// <summary>
+	/// 브라우저 기동 시 익스텐션(--load-extension) 로드 여부. appsettings.json 의 "UseExtension" 으로 바꾼다.
+	/// 기본은 켜짐(항목 없거나 값 이상이면 true). "false" 로 두면 익스텐션 없이 CDP 경로로만 동작한다.
+	/// (PP 데이터·베팅은 CDP로 되므로 영향 없음. 에볼루션 익스텐션 베팅을 쓸 때만 켜면 된다.)
+	/// </summary>
+	public static bool UseExtension =>
+		!bool.TryParse(Configuration["UseExtension"], out bool on2) || on2;
 }

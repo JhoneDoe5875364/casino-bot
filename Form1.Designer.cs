@@ -251,7 +251,7 @@ public partial class Form1
 		this.panelMenu.Location = new System.Drawing.Point(0, 0);
 		this.panelMenu.Margin = new System.Windows.Forms.Padding(4);
 		this.panelMenu.Name = "panelMenu";
-		this.panelMenu.Size = new System.Drawing.Size(2065, 60);
+		this.panelMenu.Size = new System.Drawing.Size(2065, 96);
 		this.panelMenu.TabIndex = 2;
 		this.sfButton1.BackColor = System.Drawing.Color.FromArgb(15, 52, 96);
 		this.sfButton1.Font = new System.Drawing.Font("Segoe UI Semibold", 9f);
@@ -285,7 +285,7 @@ public partial class Form1
 		this.lblUser.Font = new System.Drawing.Font("맑은 고딕", 13f, System.Drawing.FontStyle.Bold);
 		this.lblUser.ForeColor = System.Drawing.Color.FromArgb(255, 193, 7);
 		this.lblUser.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-		this.lblUser.Location = new System.Drawing.Point(1850, 14);
+		this.lblUser.Location = new System.Drawing.Point(1850, 32);
 		this.lblUser.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
 		this.lblUser.Name = "lblUser";
 		this.lblUser.Size = new System.Drawing.Size(170, 32);
@@ -320,7 +320,8 @@ public partial class Form1
 		this.cmbBetAmountType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
 		this.cmbBetAmountType.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
 		this.cmbBetAmountType.ForeColor = System.Drawing.Color.FromArgb(234, 234, 234);
-		this.cmbBetAmountType.Location = new System.Drawing.Point(700, 15);
+		this.cmbBetAmountType.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+		this.cmbBetAmountType.Location = new System.Drawing.Point(1520, 34);
 		this.cmbBetAmountType.Name = "cmbBetAmountType";
 		this.cmbBetAmountType.Size = new System.Drawing.Size(120, 28);
 		this.cmbBetAmountType.TabIndex = 11;
@@ -353,7 +354,8 @@ public partial class Form1
 		this.btnRoomManage.BackColor = System.Drawing.Color.FromArgb(15, 52, 96);
 		this.btnRoomManage.Font = new System.Drawing.Font("Segoe UI Semibold", 9f);
 		this.btnRoomManage.ForeColor = System.Drawing.Color.FromArgb(234, 234, 234);
-		this.btnRoomManage.Location = new System.Drawing.Point(323, 11);
+		this.btnRoomManage.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+		this.btnRoomManage.Location = new System.Drawing.Point(1396, 30);
 		this.btnRoomManage.Margin = new System.Windows.Forms.Padding(4);
 		this.btnRoomManage.Name = "btnRoomManage";
 		this.btnRoomManage.Size = new System.Drawing.Size(116, 37);
@@ -366,7 +368,8 @@ public partial class Form1
 		this.btnPlayRoom.BackColor = System.Drawing.Color.FromArgb(15, 52, 96);
 		this.btnPlayRoom.Font = new System.Drawing.Font("Segoe UI Semibold", 9f);
 		this.btnPlayRoom.ForeColor = System.Drawing.Color.FromArgb(234, 234, 234);
-		this.btnPlayRoom.Location = new System.Drawing.Point(194, 11);
+		this.btnPlayRoom.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+		this.btnPlayRoom.Location = new System.Drawing.Point(1272, 30);
 		this.btnPlayRoom.Margin = new System.Windows.Forms.Padding(4);
 		this.btnPlayRoom.Name = "btnPlayRoom";
 		this.btnPlayRoom.Size = new System.Drawing.Size(116, 37);
@@ -388,7 +391,7 @@ public partial class Form1
 		this.lblVirtualBadge.AutoSize = true;
 		this.lblVirtualBadge.Font = new System.Drawing.Font("맑은 고딕", 10f, System.Drawing.FontStyle.Bold);
 		this.lblVirtualBadge.ForeColor = System.Drawing.Color.FromArgb(0, 200, 255);
-		this.lblVirtualBadge.Location = new System.Drawing.Point(415, 22);
+		this.lblVirtualBadge.Location = new System.Drawing.Point(415, 36);
 		this.lblVirtualBadge.Name = "lblVirtualBadge";
 		this.lblVirtualBadge.Size = new System.Drawing.Size(120, 24);
 		this.lblVirtualBadge.TabIndex = 13;
@@ -488,7 +491,7 @@ public partial class Form1
 		this.panelRight.Location = new System.Drawing.Point(1473, 13);
 		this.panelRight.Margin = new System.Windows.Forms.Padding(4);
 		this.panelRight.Name = "panelRight";
-		this.panelRight.Size = new System.Drawing.Size(579, 951);
+		this.panelRight.Size = new System.Drawing.Size(712, 951);
 		this.panelRight.TabIndex = 0;
 		this.panelHistory.BackColor = System.Drawing.Color.FromArgb(22, 33, 62);
 		this.panelHistory.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
@@ -615,6 +618,7 @@ public partial class Form1
 		this.panelStats.Size = new System.Drawing.Size(579, 269);
 		this.panelStats.TabIndex = 2;
 		this.lblTotalBetValue.AutoSize = false;
+		this.lblTotalBetValue.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
 		this.lblTotalBetValue.ForeColor = System.Drawing.Color.FromArgb(234, 234, 234);
 		this.lblTotalBetValue.Location = new System.Drawing.Point(145, 211);
 		this.lblTotalBetValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
@@ -632,6 +636,7 @@ public partial class Form1
 		this.lblTotalBetLabel.TabIndex = 1;
 		this.lblTotalBetLabel.Text = "누적 배팅 금액";
 		this.lblPendingBetValue.AutoSize = false;
+		this.lblPendingBetValue.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
 		this.lblPendingBetValue.ForeColor = System.Drawing.Color.Orange;
 		this.lblPendingBetValue.Location = new System.Drawing.Point(145, 171);
 		this.lblPendingBetValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
@@ -649,6 +654,7 @@ public partial class Form1
 		this.lblPendingBetLabel.TabIndex = 3;
 		this.lblPendingBetLabel.Text = "진행중 베팅";
 		this.lblAfterAmountValue.AutoSize = false;
+		this.lblAfterAmountValue.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
 		this.lblAfterAmountValue.ForeColor = System.Drawing.Color.LimeGreen;
 		this.lblAfterAmountValue.Location = new System.Drawing.Point(145, 100);
 		this.lblAfterAmountValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
@@ -666,6 +672,7 @@ public partial class Form1
 		this.lblAfterAmountLabel.TabIndex = 20;
 		this.lblAfterAmountLabel.Text = "현재금액";
 		this.lblCurrentAmountValue.AutoSize = false;
+		this.lblCurrentAmountValue.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
 		this.lblCurrentAmountValue.ForeColor = System.Drawing.Color.Gold;
 		this.lblCurrentAmountValue.Location = new System.Drawing.Point(145, 131);
 		this.lblCurrentAmountValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
@@ -683,6 +690,7 @@ public partial class Form1
 		this.lblCurrentAmountLabel.TabIndex = 5;
 		this.lblCurrentAmountLabel.Text = "이익";
 		this.lblStartAmountValue.AutoSize = false;
+		this.lblStartAmountValue.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
 		this.lblStartAmountValue.ForeColor = System.Drawing.Color.FromArgb(234, 234, 234);
 		this.lblStartAmountValue.Location = new System.Drawing.Point(145, 60);
 		this.lblStartAmountValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
@@ -718,6 +726,7 @@ public partial class Form1
 		this.lblSessionPeakStepValue.TabIndex = 22;
 		this.lblSessionPeakStepValue.Text = "최고단계 : -";
 		this.lblKeepAliveValue.AutoSize = false;
+		this.lblKeepAliveValue.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
 		this.lblKeepAliveValue.ForeColor = System.Drawing.Color.FromArgb(0, 200, 255);
 		this.lblKeepAliveValue.Location = new System.Drawing.Point(145, 240);
 		this.lblKeepAliveValue.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);

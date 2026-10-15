@@ -1191,13 +1191,15 @@ public class PragmaticAutoBettingService
 		return roomState.LastBetAmount;
 	}
 
-	public void OnWinReceived(string tableId, decimal netWinBalance, decimal winAmount)
+	public void OnWinReceived(string tableId, string gameId, decimal netWinBalance, decimal winAmount)
 	{
 		// the payout for a bet placed before the stop still belongs in the ledger
 		if (!IsRunning && !IsDrainingRoom(tableId))
 		{
 			return;
 		}
+		// 2차 판정: 확인 미수신으로 '미접수' 처리됐던 베팅이, 이 win 증거로 접수 확인되면 승격·정산한다.
+		TryReconcileUnconfirmedBet(tableId, gameId, netWinBalance, winAmount);
 		FileLogger.Log($"[AutoBetting] {tableId}: win nwb={netWinBalance:+#,##0;-#,##0}, payout={winAmount:N0}");
 		if (!Context.RoomStates.TryGetValue(tableId, out RoomBettingState roomState) || !roomState.LastBetTime.HasValue)
 		{
@@ -1235,6 +1237,80 @@ public class PragmaticAutoBettingService
 		{
 			FileLogger.Log($"[AutoBetting] {tableId}: 미확인 베팅 사후 확인됨 (nwb={netWinBalance:+#,##0;-#,##0}, balDiff={balanceDiff:N0})");
 			roomState.IsUnconfirmedBet = false;
+		}
+	}
+
+	/// <summary>
+	/// 2차 판정(사후 접수 보정). 확인 메시지를 못 받아 '미접수=실패'로 처리됐던 베팅이,
+	/// 같은 gameId 의 win 메시지(nwb=-스테이크/배당 = 접수 증거)로 "사이트가 받았다"가 확인되면
+	/// 그 베팅을 '확인된 베팅'으로 승격해 정상 판정(단계·회계)한다.
+	/// 가드: ① 전송 gameId 정확 일치 ② 거절/반려는 제외(provisional 미기록) ③ 접수 증거 필수·승패는 실제 결과로
+	///       ④ 성공 경로와 동일 회계 ⑤ 라운드당 1회(소비+IsWaitingForResult 공유 마커).
+	/// </summary>
+	private void TryReconcileUnconfirmedBet(string tableId, string gameId, decimal netWinBalance, decimal winAmount)
+	{
+		if (string.IsNullOrEmpty(gameId) || _gameHistories == null)
+		{
+			return;
+		}
+		// 가드 ③(접수 증거): 이 라운드에 우리 스테이크가 실제로 움직였는가. 둘 다 0이면 안 받은 것 → 승격 안 함.
+		if (netWinBalance == 0m && winAmount <= 0m)
+		{
+			return;
+		}
+		// 승패 판정용 결과는 _lock 밖에서 먼저 조회(락 중첩 회피). 금액 추론이 아니라 실제 winner 로 판정한다.
+		GameResult? gr = null;
+		int historyCount = 0;
+		if (_gameHistories.TryGetValue(tableId, out List<GameResult> history))
+		{
+			lock (history)
+			{
+				historyCount = history.Count;
+				for (int i = history.Count - 1; i >= 0; i--)
+				{
+					if (string.Equals(history[i].GameId, gameId, StringComparison.Ordinal))
+					{
+						gr = history[i];
+						break;
+					}
+				}
+			}
+		}
+		lock (_lock)
+		{
+			if (!Context.RoomStates.TryGetValue(tableId, out RoomBettingState roomState))
+			{
+				return;
+			}
+			// 가드 ①: 정확히 이 미접수 베팅의 gameId 여야 한다. (거절건은 provisional 미기록 → 자동 제외: 가드 ②)
+			if (string.IsNullOrEmpty(roomState.ProvisionalGameId)
+				|| !string.Equals(roomState.ProvisionalGameId, gameId, StringComparison.Ordinal))
+			{
+				return;
+			}
+			decimal amt = roomState.ProvisionalAmount;
+			string target = roomState.ProvisionalTarget ?? string.Empty;
+			// 가드 ⑤: 한 번만 소비(재진입 차단). 가드 ④: 성공 경로와 동일하게 회계를 맞춘다.
+			roomState.ProvisionalGameId = null;
+			roomState.LastBetGameId = gameId;
+			roomState.LastBetAmount = amt;
+			roomState.LastBetType = target;
+			roomState.LastBetTime = roomState.ProvisionalTime ?? DateTime.Now;
+			roomState.IsWaitingForResult = true;
+			roomState.IsUnconfirmedBet = false;
+			Context.TotalBetAmount += amt;      // 접수 증명됨 → 이제 집계(성공 경로와 동일)
+			Context.PendingBetAmount += amt;    // 실패 때 뺐던 것을 재가산 → JudgeResult 가 다시 빼서 상쇄
+			FileLogger.Log($"[AutoBetting] {tableId}: ★ 미접수 베팅 사후 접수확인(win 증거: nwb={netWinBalance:+#,##0;-#,##0}, win={winAmount:N0}) → 승격 (game={gameId}, 금액={amt:N0}, 타겟={target})", "Info", "AutoBetting");
+			if (gr != null)
+			{
+				// 결과가 이미 있으면 즉시 정상 판정 경로로 정산(단계·이벤트·합산수익 전부 성공 경로와 동일).
+				JudgeResult(tableId, historyCount, gr);
+			}
+			else
+			{
+				// 결과가 아직 → IsWaitingForResult=true, LastBetGameId=gameId 로 해놨으니 결과 수신 시 JudgeResult 가 roundMatched 로 정산.
+				FileLogger.Log($"[AutoBetting] {tableId}: 승격 후 결과 대기 (game={gameId}) — 결과 수신 시 정산", "Info", "AutoBetting");
+			}
 		}
 	}
 
@@ -2007,6 +2083,8 @@ public class PragmaticAutoBettingService
 			}
 			if (result.IsSuccess)
 			{
+				// 새 베팅이 정상 접수됐으니, 아직 미해소된 이전 provisional(미접수 추적)은 폐기한다.
+				roomState.ProvisionalGameId = null;
 				roomState.LastBetGameId = state.GameId;
 				roomState.LastBetType = betType;
 				roomState.LastBetAmount = betAmount;
@@ -2063,6 +2141,9 @@ public class PragmaticAutoBettingService
 					IsIdleRound = isIdleRound,
 					MatrixRow = (Context.IsMatrixStrategy ? roomState.MatrixCurrentRow : 0),
 					MatrixCol = (Context.IsMatrixStrategy ? roomState.MatrixCurrentCol : 0),
+					CycleIndex = roomState.CycleIndex,
+					StartMultiplier = roomState.UpchigiStartMultiplier,
+					FailAccum = roomState.UpchigiFailAccum,
 					SiteSplitRemark = siteSplitRemark
 				});
 			}
@@ -2072,6 +2153,20 @@ public class PragmaticAutoBettingService
 				if (Context.PendingBetAmount < 0m)
 				{
 					Context.PendingBetAmount = 0m;
+				}
+				// 2차 판정 준비: '확인 미수신(미접수)'만 provisional 로 기억한다(거절/반려는 제외 — 가드 ②).
+				// 같은 gameId 의 win/결과(접수 증거)가 오면 TryReconcileUnconfirmedBet 에서 승격·정산한다.
+				if (result.IsTimeoutUnconfirmed && !isIdleRound && !string.IsNullOrEmpty(state.GameId))
+				{
+					roomState.ProvisionalGameId = state.GameId;
+					roomState.ProvisionalAmount = betAmount;
+					roomState.ProvisionalTarget = betType;
+					roomState.ProvisionalTime = DateTime.Now;
+					FileLogger.Log($"[AutoBetting] {tableId}: 미접수 베팅 provisional 기록 (game={state.GameId}, 금액={betAmount:N0}, 타겟={betType}) — win/결과 증거 대기", "Warning", "AutoBetting");
+				}
+				else
+				{
+					roomState.ProvisionalGameId = null;   // 거절 등은 사후 보정 대상 아님
 				}
 				FileLogger.Log($"[AutoBetting] {tableId}: 베팅 실패 → PendingBet -{betAmount:N0} → 합계={Context.PendingBetAmount:N0}, 사유={result.ErrorMessage}");
 				PendingBetAmountChanged?.Invoke(Context.PendingBetAmount);
@@ -2089,6 +2184,9 @@ public class PragmaticAutoBettingService
 					IsIdleRound = isIdleRound,
 					MatrixRow = (Context.IsMatrixStrategy ? roomState.MatrixCurrentRow : 0),
 					MatrixCol = (Context.IsMatrixStrategy ? roomState.MatrixCurrentCol : 0),
+					CycleIndex = roomState.CycleIndex,
+					StartMultiplier = roomState.UpchigiStartMultiplier,
+					FailAccum = roomState.UpchigiFailAccum,
 					SiteSplitRemark = siteSplitRemark
 				});
 			}
@@ -2125,13 +2223,15 @@ public class PragmaticAutoBettingService
 		RequestRoomRecoveryForStaleSites(tableId);
 		List<BettingSite> sites = (_multiSites ?? Array.Empty<BettingSite>()).Where((BettingSite s) => s.IsActive && IsSiteReadyForBet(s.SiteSlot, tableId)).ToList();
 		int maxSites = _getSplitCount?.Invoke() ?? 1;
-		BetAllocationService.AllocationResult allocation = _betAllocationService.Allocate(amount, sites, maxSites);
+		decimal perSiteLimit = (Context.PerSiteLimit >= 10000m ? Context.PerSiteLimit : 5000000m);
+		decimal splitThreshold = (Context.SplitThreshold >= 10000m ? Context.SplitThreshold : 40000m);
+		BetAllocationService.AllocationResult allocation = _betAllocationService.Allocate(amount, sites, maxSites, perSiteLimit, splitThreshold);
 		if (allocation.ExceedsPerSiteLimit)
 		{
 			return new SplitBetOutcome
 			{
 				StopRequested = true,
-				StopReason = $"분할해도 사이트당 {5000000m:N0}원 초과 (베팅금 {amount:N0}, 최대 {maxSites}곳)"
+				StopReason = $"분할해도 사이트당 {perSiteLimit:N0}원 초과 (베팅금 {amount:N0}, 최대 {maxSites}곳)"
 			};
 		}
 		IReadOnlyList<SiteBetSplit> splits = allocation.Splits;
@@ -3377,6 +3477,7 @@ public class PragmaticAutoBettingService
 		// 누적실패(미당첨 횟수) 상승: 미당첨마다 +1(업치기 단계·일정베팅 구간 모두 포함), 임계 도달 시 그 방의 시작금액 배수를 설정 배수만큼 누적 상승(×2→×4→…), 배수 상한까지만.
 		if (!isWin)
 		{
+			roomState.CycleIndex++;   // 회차는 미당첨(실패) 때만 +1 (타이는 위에서 return, 당첨/완주는 유지)
 			roomState.UpchigiFailAccum++;
 			int failThr = Context.UpchigiFailEscalateThreshold;
 			decimal escMult = Context.UpchigiFailEscalateMultiplier;
@@ -3391,7 +3492,8 @@ public class PragmaticAutoBettingService
 				}
 				roomState.UpchigiStartMultiplier = nextMult;
 				roomState.UpchigiFailAccum = 0;
-				FileLogger.Log($"[AutoBetting][업치기] {tableId}: ★ 누적실패 {failThr}회 도달 → 시작금액 배수 ×{roomState.UpchigiStartMultiplier:0.##} {(capped ? "(상한 도달)" : "상승")}");
+				roomState.CycleIndex = 1;   // 배수 상승 순간 회차를 1부터 다시(표기: "1-1 ×N")
+				FileLogger.Log($"[AutoBetting][업치기] {tableId}: ★ 누적실패 {failThr}회 도달 → 시작금액 배수 ×{roomState.UpchigiStartMultiplier:0.##} {(capped ? "(상한 도달)" : "상승")} (회차 1로 리셋)");
 			}
 		}
 		// 합산수익 리셋: 전체(모든 방) 합산 순손익이 합산수익을 넘으면 — 즉 전체 손실을 다 메우고
@@ -3407,6 +3509,7 @@ public class PragmaticAutoBettingService
 				rs.UpchigiCycleNet = 0m;
 				rs.UpchigiStartMultiplier = 1m;
 				rs.UpchigiFailAccum = 0;
+				// 합산수익 리셋은 '실패'가 아니므로 회차(CycleIndex)는 그대로 유지하고 단계만 1로 초기화한다.
 			}
 			Context.UpchigiGlobalNet = 0m;
 		}

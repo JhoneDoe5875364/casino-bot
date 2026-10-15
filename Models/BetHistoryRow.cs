@@ -32,6 +32,9 @@ public class BetHistoryRow : INotifyPropertyChanged
 
 	public int Step { get; set; }
 
+	/// <summary>그리드 "단계" 칸 표시용. 일직선 전략은 "회차-단계"(예: 102-2), 매트릭스는 "행-열". 비면 Step 숫자.</summary>
+	public string StepDisplay { get; set; } = string.Empty;
+
 	public string BetType { get; set; } = string.Empty;
 
 	public decimal BetAmount { get; set; }

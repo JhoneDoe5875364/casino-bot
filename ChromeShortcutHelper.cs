@@ -152,31 +152,41 @@ public static class ChromeShortcutHelper
 
 	private static string BuildArguments(int port)
 	{
-		// Only the extensions this account is entitled to. Loading Evolution's hooks for a
-		// Pragmatic-only member costs nothing functionally but puts a JSON.parse hook on every page
-		// they visit, so the grant decides.
+		// PP(프라그마틱)는 데이터·베팅·잔액이 전부 CDP로 동작하므로 익스텐션이 필요 없다. 에볼루션만 소켓
+		// 암호화 때문에 복호화·후킹 inject.js(MAIN world)가 익스텐션으로만 돈다 → 에볼루션 권한일 때만 로드.
 		GameProviders granted = AuthService.CurrentProviders;
-		List<string> extensions = new List<string>();
-		string extPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Extension");
-		if (granted.HasFlag(GameProviders.PragmaticPlay) && Directory.Exists(extPath))
+		bool useExtension = AppConfiguration.UseExtension;
+		string loadArg = string.Empty;
+		if (useExtension)
 		{
-			extensions.Add(extPath);
+			string evoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ExtensionEvolution");
+			if (granted.HasFlag(GameProviders.Evolution) && Directory.Exists(evoPath))
+			{
+				loadArg = evoPath;
+			}
 		}
-		string evoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ExtensionEvolution");
-		if (granted.HasFlag(GameProviders.Evolution) && Directory.Exists(evoPath))
+		FileLogger.Log($"[ChromeShortcutHelper] 익스텐션 로드: {(string.IsNullOrEmpty(loadArg) ? "없음(PP는 CDP)" : loadArg)}", "Info", DbLogService.SessionCategory);
+		List<string> argList = new List<string>
 		{
-			extensions.Add(evoPath);
-		}
-		if (extensions.Count == 0)
+			$"--remote-debugging-port={port}",
+			"--user-data-dir=\"C:\\ChromeDebugProfile\"",
+			"--no-first-run",
+			"--no-default-browser-check",
+			"--mute-audio",
+			// GPU 가속 렌더러 크래시(STATUS_ACCESS_VIOLATION, "Aw Snap") 회피 — stake 로그인/게임 페이지에서
+			// GPU 드라이버 경로가 렌더러를 죽이는 것을 막는다. 영상은 소프트웨어 렌더되지만 베팅은 데이터 소켓이라 무관.
+			"--disable-gpu",
+			// RendererCodeIntegrity: 백신/보안 SW가 렌더러에 서명 안 된 DLL을 주입해 생기는 STATUS_ACCESS_VIOLATION
+			//   ("Aw Snap")의 대표 원인. 설치된 크롬은 화이트리스트라 괜찮고 번들 크롬(비표준 경로)만 주입 충돌로
+			//   죽는 패턴과 일치 → 끈다. (렌더러 보안 완화일 뿐 봇 동작엔 무관)
+			// LocalNetworkAccessChecks...: content.js -> ws://127.0.0.1 릴레이가 로컬 네트워크 정책에 막히는 것 방지.
+			"--disable-features=RendererCodeIntegrity,LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults"
+		};
+		if (useExtension && !string.IsNullOrEmpty(loadArg))
 		{
-			// never launch with an empty --load-extension; fall back to the Pragmatic one
-			extensions.Add(extPath);
+			argList.Add("--load-extension=\"" + loadArg + "\"");
 		}
-		string loadArg = string.Join(",", extensions);
-		FileLogger.Log($"[ChromeShortcutHelper] 익스텐션 로드: {GameProviderNames.Label(granted)} → {loadArg}", "Info", DbLogService.SessionCategory);
-		// --disable-features=...LocalNetworkAccessChecks...: content.js -> ws://127.0.0.1 릴레이가
-		// Chrome의 Local/Private Network Access 정책(ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS)에 막히는 것 방지
-		return $"--remote-debugging-port={port} --user-data-dir=\"{"C:\\ChromeDebugProfile"}\" --load-extension=\"{loadArg}\" --no-first-run --no-default-browser-check --disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults";
+		return string.Join(' ', argList);
 	}
 
 	public static void CreateDesktopShortcut()

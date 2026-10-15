@@ -47,22 +47,26 @@ public partial class LoginForm : Form
 	/// <summary>타이틀의 "KingTigerBet" 텍스트를 로고 이미지로 교체한다(로고를 못 불러오면 텍스트 유지).</summary>
 	private void SetupLogo()
 	{
-		Image img = AppImages.Logo;
+		// 메인창과 동일한 와이드 엠블럼을 쓴다(못 불러오면 기존 로고로 폴백).
+		Image img = AppImages.Emblem ?? AppImages.Logo;
 		if (img == null || lblTitle == null)
 		{
 			return;
 		}
 		lblTitle.Text = string.Empty;
 		lblTitle.ImageAlign = ContentAlignment.MiddleCenter;
-		// Label 은 이미지를 원본 크기로 그리므로, 타이틀 높이에 맞춰 사각형으로 미리 축소한다.
-		int h = Math.Max(48, lblTitle.Height - 16);
+		// Label 은 이미지를 원본 크기로 그리므로, 타이틀 높이에 맞춰 미리 축소한다.
+		// 엠블럼은 가로형(≈3:1)이라 정사각으로 늘리면 찌그러지므로 가로세로비를 그대로 유지한다.
+		int h = Math.Max(48, lblTitle.Height - 20);
+		double ar = (img.Height > 0) ? ((double)img.Width / img.Height) : 1.0;
+		int w = Math.Max(h, (int)Math.Round(h * ar));
 		try
 		{
-			Bitmap scaled = new Bitmap(h, h);
+			Bitmap scaled = new Bitmap(w, h);
 			using (Graphics g = Graphics.FromImage(scaled))
 			{
 				g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-				g.DrawImage(img, 0, 0, h, h);
+				g.DrawImage(img, 0, 0, w, h);
 			}
 			lblTitle.Image = scaled;
 		}

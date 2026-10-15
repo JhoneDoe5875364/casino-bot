@@ -48,11 +48,25 @@ public partial class OptionSettingForm
 
 	private Label lblVirtualBetInfo;
 
+	private Label lblSplitGroup;
+
 	private Label lblBetSplit;
 
 	private ComboBox cmbBetSplit;
 
 	private Label lblBetSplitSuffix;
+
+	private Label lblPerSiteLimit;
+
+	private System.Windows.Forms.NumericUpDown nudPerSiteLimit;
+
+	private Label lblPerSiteLimitSuffix;
+
+	private Label lblSplitStart;
+
+	private System.Windows.Forms.NumericUpDown nudSplitStart;
+
+	private Label lblSplitStartSuffix;
 
 	private Button btnSave;
 
@@ -88,11 +102,20 @@ public partial class OptionSettingForm
 		this.cmbStepAlarm = new System.Windows.Forms.ComboBox();
 		this.chkVirtualBet = new System.Windows.Forms.CheckBox();
 		this.lblVirtualBetInfo = new System.Windows.Forms.Label();
+		this.lblSplitGroup = new System.Windows.Forms.Label();
 		this.lblBetSplit = new System.Windows.Forms.Label();
 		this.cmbBetSplit = new System.Windows.Forms.ComboBox();
 		this.lblBetSplitSuffix = new System.Windows.Forms.Label();
+		this.lblPerSiteLimit = new System.Windows.Forms.Label();
+		this.nudPerSiteLimit = new System.Windows.Forms.NumericUpDown();
+		this.lblPerSiteLimitSuffix = new System.Windows.Forms.Label();
+		this.lblSplitStart = new System.Windows.Forms.Label();
+		this.nudSplitStart = new System.Windows.Forms.NumericUpDown();
+		this.lblSplitStartSuffix = new System.Windows.Forms.Label();
 		this.btnSave = new System.Windows.Forms.Button();
 		this.btnCancel = new System.Windows.Forms.Button();
+		((System.ComponentModel.ISupportInitialize)this.nudPerSiteLimit).BeginInit();
+		((System.ComponentModel.ISupportInitialize)this.nudSplitStart).BeginInit();
 		base.SuspendLayout();
 		this.lblTitle.AutoSize = true;
 		this.lblTitle.Font = new System.Drawing.Font("맑은 고딕", 12f, System.Drawing.FontStyle.Bold);
@@ -226,29 +249,80 @@ public partial class OptionSettingForm
 		this.lblVirtualBetInfo.Name = "lblVirtualBetInfo";
 		this.lblVirtualBetInfo.Size = new System.Drawing.Size(400, 18);
 		this.lblVirtualBetInfo.Text = "실제 베팅을 보내지 않고 결과만 모의로 판정합니다.";
+		this.lblSplitGroup.AutoSize = true;
+		this.lblSplitGroup.Font = new System.Drawing.Font("맑은 고딕", 9f, System.Drawing.FontStyle.Bold);
+		this.lblSplitGroup.ForeColor = System.Drawing.Color.FromArgb(15, 82, 186);
+		this.lblSplitGroup.Location = new System.Drawing.Point(22, 362);
+		this.lblSplitGroup.Name = "lblSplitGroup";
+		this.lblSplitGroup.Size = new System.Drawing.Size(90, 15);
+		this.lblSplitGroup.Text = "찢어베팅 설정";
 		this.lblBetSplit.AutoSize = true;
 		this.lblBetSplit.Font = new System.Drawing.Font("맑은 고딕", 10f);
-		this.lblBetSplit.Location = new System.Drawing.Point(30, 360);
+		this.lblBetSplit.Location = new System.Drawing.Point(30, 388);
 		this.lblBetSplit.Name = "lblBetSplit";
 		this.lblBetSplit.Size = new System.Drawing.Size(80, 19);
 		this.lblBetSplit.Text = "분할개수";
 		this.cmbBetSplit.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
 		this.cmbBetSplit.Font = new System.Drawing.Font("맑은 고딕", 10f);
 		this.cmbBetSplit.Items.AddRange("사용안함", "2", "4", "6");
-		this.cmbBetSplit.Location = new System.Drawing.Point(180, 357);
+		this.cmbBetSplit.Location = new System.Drawing.Point(180, 385);
 		this.cmbBetSplit.Name = "cmbBetSplit";
 		this.cmbBetSplit.Size = new System.Drawing.Size(90, 25);
 		this.lblBetSplitSuffix.AutoSize = true;
 		this.lblBetSplitSuffix.Font = new System.Drawing.Font("맑은 고딕", 9f);
 		this.lblBetSplitSuffix.ForeColor = System.Drawing.Color.Gray;
-		this.lblBetSplitSuffix.Location = new System.Drawing.Point(278, 361);
+		this.lblBetSplitSuffix.Location = new System.Drawing.Point(278, 389);
 		this.lblBetSplitSuffix.Name = "lblBetSplitSuffix";
 		this.lblBetSplitSuffix.Size = new System.Drawing.Size(240, 15);
 		this.lblBetSplitSuffix.Text = "찢어베팅에 쓸 사이트 수 (사용안함 = 1대 단독)";
+		this.lblPerSiteLimit.AutoSize = true;
+		this.lblPerSiteLimit.Font = new System.Drawing.Font("맑은 고딕", 10f);
+		this.lblPerSiteLimit.Location = new System.Drawing.Point(30, 418);
+		this.lblPerSiteLimit.Name = "lblPerSiteLimit";
+		this.lblPerSiteLimit.Size = new System.Drawing.Size(100, 19);
+		this.lblPerSiteLimit.Text = "사이트당 한도";
+		this.nudPerSiteLimit.Font = new System.Drawing.Font("맑은 고딕", 10f);
+		this.nudPerSiteLimit.Location = new System.Drawing.Point(180, 415);
+		this.nudPerSiteLimit.Name = "nudPerSiteLimit";
+		this.nudPerSiteLimit.Size = new System.Drawing.Size(120, 25);
+		this.nudPerSiteLimit.Maximum = new decimal(new int[] { 100000000, 0, 0, 0 });
+		this.nudPerSiteLimit.Minimum = new decimal(new int[] { 10000, 0, 0, 0 });
+		this.nudPerSiteLimit.Increment = new decimal(new int[] { 10000, 0, 0, 0 });
+		this.nudPerSiteLimit.ThousandsSeparator = true;
+		this.nudPerSiteLimit.Value = new decimal(new int[] { 5000000, 0, 0, 0 });
+		this.lblPerSiteLimitSuffix.AutoSize = true;
+		this.lblPerSiteLimitSuffix.Font = new System.Drawing.Font("맑은 고딕", 9f);
+		this.lblPerSiteLimitSuffix.ForeColor = System.Drawing.Color.Gray;
+		this.lblPerSiteLimitSuffix.Location = new System.Drawing.Point(310, 419);
+		this.lblPerSiteLimitSuffix.Name = "lblPerSiteLimitSuffix";
+		this.lblPerSiteLimitSuffix.Size = new System.Drawing.Size(300, 15);
+		this.lblPerSiteLimitSuffix.Text = "원 — 한 사이트 최대(넘으면 다음 사이트로 분할)";
+		this.lblSplitStart.AutoSize = true;
+		this.lblSplitStart.Font = new System.Drawing.Font("맑은 고딕", 10f);
+		this.lblSplitStart.Location = new System.Drawing.Point(30, 451);
+		this.lblSplitStart.Name = "lblSplitStart";
+		this.lblSplitStart.Size = new System.Drawing.Size(100, 19);
+		this.lblSplitStart.Text = "찢어베팅 시작";
+		this.nudSplitStart.Font = new System.Drawing.Font("맑은 고딕", 10f);
+		this.nudSplitStart.Location = new System.Drawing.Point(180, 448);
+		this.nudSplitStart.Name = "nudSplitStart";
+		this.nudSplitStart.Size = new System.Drawing.Size(120, 25);
+		this.nudSplitStart.Maximum = new decimal(new int[] { 100000000, 0, 0, 0 });
+		this.nudSplitStart.Minimum = new decimal(new int[] { 10000, 0, 0, 0 });
+		this.nudSplitStart.Increment = new decimal(new int[] { 10000, 0, 0, 0 });
+		this.nudSplitStart.ThousandsSeparator = true;
+		this.nudSplitStart.Value = new decimal(new int[] { 40000, 0, 0, 0 });
+		this.lblSplitStartSuffix.AutoSize = true;
+		this.lblSplitStartSuffix.Font = new System.Drawing.Font("맑은 고딕", 9f);
+		this.lblSplitStartSuffix.ForeColor = System.Drawing.Color.Gray;
+		this.lblSplitStartSuffix.Location = new System.Drawing.Point(310, 452);
+		this.lblSplitStartSuffix.Name = "lblSplitStartSuffix";
+		this.lblSplitStartSuffix.Size = new System.Drawing.Size(300, 15);
+		this.lblSplitStartSuffix.Text = "원 이상일 때만 분할(미만은 1사이트 단독)";
 		this.btnSave.BackColor = System.Drawing.Color.FromArgb(40, 167, 69);
 		this.btnSave.Font = new System.Drawing.Font("맑은 고딕", 9f, System.Drawing.FontStyle.Bold);
 		this.btnSave.ForeColor = System.Drawing.Color.White;
-		this.btnSave.Location = new System.Drawing.Point(413, 404);
+		this.btnSave.Location = new System.Drawing.Point(413, 492);
 		this.btnSave.Name = "btnSave";
 		this.btnSave.Size = new System.Drawing.Size(90, 32);
 		this.btnSave.Text = "저장";
@@ -257,7 +331,7 @@ public partial class OptionSettingForm
 		this.btnCancel.BackColor = System.Drawing.Color.FromArgb(108, 117, 125);
 		this.btnCancel.Font = new System.Drawing.Font("맑은 고딕", 9f, System.Drawing.FontStyle.Bold);
 		this.btnCancel.ForeColor = System.Drawing.Color.White;
-		this.btnCancel.Location = new System.Drawing.Point(510, 404);
+		this.btnCancel.Location = new System.Drawing.Point(510, 492);
 		this.btnCancel.Name = "btnCancel";
 		this.btnCancel.Size = new System.Drawing.Size(90, 32);
 		this.btnCancel.Text = "취소";
@@ -265,7 +339,7 @@ public partial class OptionSettingForm
 		this.btnCancel.Click += new System.EventHandler(BtnCancel_Click);
 		base.AutoScaleDimensions = new System.Drawing.SizeF(7f, 15f);
 		base.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-		base.ClientSize = new System.Drawing.Size(624, 454);
+		base.ClientSize = new System.Drawing.Size(624, 544);
 		base.Controls.Add(this.lblTitle);
 		base.Controls.Add(this.lblBettingGroup);
 		base.Controls.Add(this.chkPeakReset);
@@ -285,7 +359,14 @@ public partial class OptionSettingForm
 		base.Controls.Add(this.cmbStepAlarm);
 		base.Controls.Add(this.lblBetSplit);
 		base.Controls.Add(this.cmbBetSplit);
+		base.Controls.Add(this.lblSplitGroup);
 		base.Controls.Add(this.lblBetSplitSuffix);
+		base.Controls.Add(this.lblPerSiteLimit);
+		base.Controls.Add(this.nudPerSiteLimit);
+		base.Controls.Add(this.lblPerSiteLimitSuffix);
+		base.Controls.Add(this.lblSplitStart);
+		base.Controls.Add(this.nudSplitStart);
+		base.Controls.Add(this.lblSplitStartSuffix);
 		base.Controls.Add(this.btnSave);
 		base.Controls.Add(this.btnCancel);
 		base.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
@@ -295,6 +376,8 @@ public partial class OptionSettingForm
 		base.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
 		this.Text = "옵션 설정";
 		base.Load += new System.EventHandler(OptionSettingForm_Load);
+		((System.ComponentModel.ISupportInitialize)this.nudPerSiteLimit).EndInit();
+		((System.ComponentModel.ISupportInitialize)this.nudSplitStart).EndInit();
 		base.ResumeLayout(false);
 		base.PerformLayout();
 	}

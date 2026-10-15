@@ -24,7 +24,7 @@ public class BetAllocationService(Random? random = null)
 
 	private readonly Random _random = random ?? Random.Shared;
 
-	public AllocationResult Allocate(decimal stepAmount, IReadOnlyList<BettingSite> activeSites, int maxSites)
+	public AllocationResult Allocate(decimal stepAmount, IReadOnlyList<BettingSite> activeSites, int maxSites, decimal maxPerSite = 0m, decimal splitThreshold = 0m)
 	{
 		if (stepAmount <= 0m || activeSites == null)
 		{
@@ -41,9 +41,12 @@ public class BetAllocationService(Random? random = null)
 		}
 		long total = (long)stepAmount;
 		long min = 10000L;
-		long max = 5000000L;
+		// 사이트당 한도: 설정값(원) 사용, 없으면 기본 500만. 1,000원 단위로 내림 정렬해 분배 단위와 맞춘다.
+		long max = ((maxPerSite >= 10000m) ? ((long)maxPerSite / 1000L * 1000L) : 5000000L);
+		// 찢어베팅 시작 금액: 설정값 사용(최소 min 이상), 없으면 기본 4만.
+		long threshold = ((splitThreshold >= min) ? (long)splitThreshold : 40000L);
 		int siteCount;
-		if (total < 40000)
+		if (total < threshold)
 		{
 			siteCount = 1;
 		}

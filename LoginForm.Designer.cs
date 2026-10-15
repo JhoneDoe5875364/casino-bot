@@ -83,7 +83,7 @@ public partial class LoginForm
 		this.panelMain.Controls.Add(this.txtUsername);
 		this.panelMain.Controls.Add(this.lblPassword);
 		this.panelMain.Controls.Add(this.lblUsername);
-		this.panelMain.Location = new System.Drawing.Point(32, 100);
+		this.panelMain.Location = new System.Drawing.Point(32, 139);
 		this.panelMain.Name = "panelMain";
 		this.panelMain.Size = new System.Drawing.Size(386, 240);
 		this.panelMain.TabIndex = 6;
@@ -153,14 +153,14 @@ public partial class LoginForm
 		this.lblTitle.ForeColor = System.Drawing.Color.FromArgb(255, 165, 0);
 		this.lblTitle.Location = new System.Drawing.Point(0, 0);
 		this.lblTitle.Name = "lblTitle";
-		this.lblTitle.Size = new System.Drawing.Size(447, 93);
+		this.lblTitle.Size = new System.Drawing.Size(447, 132);
 		this.lblTitle.TabIndex = 0;
 		this.lblTitle.Text = "KingTigerBet";
 		this.lblTitle.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
 		base.AutoScaleDimensions = new System.Drawing.SizeF(9f, 20f);
 		base.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
 		this.BackColor = System.Drawing.Color.FromArgb(26, 26, 46);
-		base.ClientSize = new System.Drawing.Size(449, 399);
+		base.ClientSize = new System.Drawing.Size(449, 438);
 		base.Controls.Add(this.panelOuter);
 		base.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
 		base.MaximizeBox = false;

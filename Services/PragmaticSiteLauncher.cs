@@ -54,33 +54,45 @@ public static class PragmaticSiteLauncher
 		}
 		foreach (int port in candidates)
 		{
-			if (await IsCdpReachableAsync(port).ConfigureAwait(continueOnCapturedContext: false))
+			// 포트에 CDP가 응답해도, 그게 '봇 자신(이 슬롯 프로필)'의 Chrome일 때만 재사용한다.
+			// 외부 Chrome(사용자 일반 크롬·다른 도구)이 같은 포트에 떠 있을 때 거기 잘못 붙어
+			// 정작 봇 브라우저는 안 뜨던 문제 방지.
+			if (await IsCdpReachableAsync(port).ConfigureAwait(continueOnCapturedContext: false)
+				&& IsOwnBrowserOnPort(port, profileDir))
 			{
-				FileLogger.Log($"[SiteLauncher] 슬롯{siteSlot}({browserType}): 포트 {port}에 이미 CDP 응답 중 - 재사용");
+				FileLogger.Log($"[SiteLauncher] 슬롯{siteSlot}({browserType}): 포트 {port}에 봇 프로필 Chrome이 이미 떠 있음 - 재사용");
 				return port;
 			}
 		}
-		// Slot browsers obey the same grant as the main one — otherwise a Pragmatic-only account
-		// would still get Evolution's hooks on every split-betting window.
-		GameProviders granted = AuthService.CurrentProviders;
-		string? extensionDir = granted.HasFlag(GameProviders.PragmaticPlay)
-			? PrepareSlotExtension(siteSlot, browserType, wsServerPort)
-			: null;
-		string? evolutionDir = granted.HasFlag(GameProviders.Evolution)
-			? PrepareSlotExtensionEvolution(siteSlot, browserType, wsServerPort)
-			: null;
-		if (extensionDir == null && evolutionDir == null)
+		// 익스텐션 로드 토글(appsettings "UseExtension"). false면 익스텐션 준비·--load-extension 자체를 건너뛴다.
+		// PP 데이터·베팅은 CDP 경로로 동작하므로 영향 없음. 에볼루션 익스텐션 베팅을 쓸 때만 켜면 된다.
+		bool useExtension = AppConfiguration.UseExtension;
+		string loadArg = string.Empty;
+		if (useExtension)
 		{
-			// never launch with an empty --load-extension
-			extensionDir = PrepareSlotExtension(siteSlot, browserType, wsServerPort);
-			if (extensionDir == null)
+			// PP(프라그마틱)는 데이터·베팅·잔액이 전부 CDP로 동작하므로 익스텐션이 필요 없다
+			// (봇이 inject.js 를 상시 CDP 주입해 후킹, Network 프레임 직접 캡처, SendBetDirect 로 베팅).
+			// 반면 에볼루션은 게임 소켓이 암호화라, 복호화·후킹하는 inject.js(MAIN world)가 익스텐션으로만 돈다.
+			// → 에볼루션 권한이 있을 때만 '에볼루션 익스텐션'만 로드한다. (프라그마틱 익스텐션은 로드하지 않음)
+			GameProviders granted = AuthService.CurrentProviders;
+			string? evolutionDir = granted.HasFlag(GameProviders.Evolution)
+				? PrepareSlotExtensionEvolution(siteSlot, browserType, wsServerPort)
+				: null;
+			loadArg = evolutionDir ?? string.Empty;
+			if (string.IsNullOrEmpty(loadArg))
 			{
-				FileLogger.Log($"[SiteLauncher] 슬롯{siteSlot}: Extension 사본 생성 실패", "Error", "MultiSite");
-				return null;
+				FileLogger.Log($"[SiteLauncher] 슬롯{siteSlot}: 에볼루션 권한 없음 → 익스텐션 미로드 (PP는 CDP로 동작)", "Info", "MultiSite");
 			}
+			else
+			{
+				FileLogger.Log($"[SiteLauncher] 슬롯{siteSlot}: 에볼루션 익스텐션만 로드 (PP는 CDP)", "Info", "MultiSite");
+			}
+			FileLogger.Log($"[SiteLauncher] 슬롯{siteSlot} 익스텐션 로드: {GameProviderNames.Label(granted)}", "Info", "MultiSite");
 		}
-		string loadArg = string.Join(",", new[] { extensionDir, evolutionDir }.Where(d => !string.IsNullOrEmpty(d)));
-		FileLogger.Log($"[SiteLauncher] 슬롯{siteSlot} 익스텐션 로드: {GameProviderNames.Label(granted)}", "Info", "MultiSite");
+		else
+		{
+			FileLogger.Log($"[SiteLauncher] 슬롯{siteSlot}: 익스텐션 미로드 (UseExtension=false) — CDP 경로로만 동작", "Info", "MultiSite");
+		}
 		if (KillZombieBrowsers(profileDir, siteSlot) > 0)
 		{
 			await Task.Delay(1500).ConfigureAwait(continueOnCapturedContext: false);
@@ -103,17 +115,25 @@ public static class PragmaticSiteLauncher
 		{
 			$"--remote-debugging-port={chosenPort.Value}",
 			"--user-data-dir=\"" + profileDir + "\"",
-			// 권한에 포함된 익스텐션만 콤마로 결합해 로드
-			"--load-extension=\"" + loadArg + "\"",
 			"--no-first-run",
 			"--no-default-browser-check",
 			// 라이브 바카라 테이블마다 오디오 스트림을 디코딩하지 않도록 음소거 — 베팅은 데이터 소켓으로
 			// 하므로 소리는 불필요하고, 테이블이 많을수록 CPU 절감이 크다.
 			"--mute-audio",
+			// GPU 가속 렌더러 크래시(STATUS_ACCESS_VIOLATION, "Aw Snap") 회피. 일부 사이트(예: stake) 로그인
+			// 페이지에서 GPU 드라이버 경로가 렌더러를 죽이는 것을 막는다. 영상은 소프트웨어 렌더(느려짐)되지만
+			// 베팅은 데이터 소켓이라 영향 없다. 방이 많으면 CPU 부담이 늘 수 있어, 효과 없으면 되돌린다.
+			"--disable-gpu",
+			// RendererCodeIntegrity: 백신/보안 SW의 렌더러 DLL 주입으로 생기는 STATUS_ACCESS_VIOLATION("Aw Snap") 방지.
 			// content.js -> ws://127.0.0.1 릴레이가 Chrome의 Local/Private Network Access 정책에
 			// 막히는 것(ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS) 방지
-			"--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults"
+			"--disable-features=RendererCodeIntegrity,LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults"
 		};
+		// 토글이 켜졌고 로드할 익스텐션이 있을 때만 --load-extension 을 붙인다(권한 익스텐션만 콤마 결합).
+		if (useExtension && !string.IsNullOrEmpty(loadArg))
+		{
+			argList.Add("--load-extension=\"" + loadArg + "\"");
+		}
 		if (!string.IsNullOrWhiteSpace(startUrl))
 		{
 			argList.Add("\"" + startUrl + "\"");
@@ -425,6 +445,48 @@ public static class PragmaticSiteLauncher
 	private static string NormalizePath(string path)
 	{
 		return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+	}
+
+	// 포트에 응답하는 Chrome이 '봇 자신의 것'(= 이 슬롯 프로필로 띄운 것)인지 확인한다.
+	// 외부 Chrome이 우연히 같은 포트에 떠 있을 때 거기에 잘못 붙어 재사용하는 것을 막는다.
+	private static bool IsOwnBrowserOnPort(int port, string profileDir)
+	{
+		string targetDir;
+		try
+		{
+			targetDir = NormalizePath(profileDir);
+		}
+		catch
+		{
+			return false;
+		}
+		try
+		{
+			using ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT CommandLine FROM Win32_Process WHERE Name = 'chrome.exe' OR Name = 'msedge.exe'");
+			foreach (ManagementObject mo in searcher.Get().Cast<ManagementObject>())
+			{
+				using (mo)
+				{
+					if (!(mo["CommandLine"] is string cmd))
+					{
+						continue;
+					}
+					if (cmd.IndexOf($"--remote-debugging-port={port}", StringComparison.OrdinalIgnoreCase) < 0)
+					{
+						continue;
+					}
+					string? udd = ExtractUserDataDir(cmd);
+					if (udd != null && string.Equals(udd, targetDir, StringComparison.OrdinalIgnoreCase))
+					{
+						return true;
+					}
+				}
+			}
+		}
+		catch
+		{
+		}
+		return false;
 	}
 
 	private static async Task<bool> IsCdpReachableAsync(int port)

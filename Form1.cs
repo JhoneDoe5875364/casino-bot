@@ -1174,7 +1174,7 @@ public partial class Form1 : Form
 	private void Parser_WinReceived(object? sender, PpWinArgs e)
 	{
 		string tableKey = ResolveTableKey(e.TableId);
-		_autoBettingService.OnWinReceived(tableKey, e.NetWinBalance, e.WinAmount);
+		_autoBettingService.OnWinReceived(tableKey, e.GameId, e.NetWinBalance, e.WinAmount);
 		FileLogger.Log($"[Win] {tableKey}: nwb={e.NetWinBalance}, win={e.WinAmount}");
 		ApplyWinToBalance(tableKey, e.GameId, e.WinAmount);
 	}
@@ -2271,21 +2271,26 @@ public partial class Form1 : Form
 			lblLogo.Click -= LogoClicked;
 			lblLogo.Click += LogoClicked;
 		}
-		Image img = PragmaticBot.Services.AppImages.Logo;
+		// 메인 상단바는 와이드 엠블럼(Pragmatic Play × Evolution)을 쓴다. 못 불러오면 기존 로고로 폴백.
+		Image img = PragmaticBot.Services.AppImages.Emblem ?? PragmaticBot.Services.AppImages.Logo;
 		if (img == null || lblLogo == null) { return; }
 
 		lblLogo.Text = string.Empty;
 		lblLogo.Visible = false;
 
-		int h = Math.Max(24, panelMenu.ClientSize.Height - 12);
+		// 바 높이를 거의 꽉 채워 크게. 이미지 가로세로비(엠블럼≈3:1)를 그대로 반영해 가로형으로 늘린다.
+		int lh = Math.Max(24, panelMenu.ClientSize.Height - 8);
+		double ar = (img.Height > 0) ? ((double)img.Width / img.Height) : 1.0;
+		int lw = Math.Max(lh, (int)Math.Round(lh * ar));
 		_picLogo = new PictureBox
 		{
 			Name = "picLogo",
 			Image = img,
 			SizeMode = PictureBoxSizeMode.Zoom,
-			Size = new Size(h, h),
-			Location = new Point(lblLogo.Left, Math.Max(0, (panelMenu.ClientSize.Height - h) / 2)),
-			BackColor = Color.White,
+			Size = new Size(lw, lh),
+			Location = new Point(lblLogo.Left, Math.Max(0, (panelMenu.ClientSize.Height - lh) / 2)),
+			// 엠블럼은 투명 배경·밝은 아트 → 메뉴바와 동일한 어두운 배경에 얹어 자연스럽게 보이게 한다.
+			BackColor = panelMenu.BackColor,
 			Cursor = Cursors.Hand,
 			TabStop = false
 		};
@@ -2417,9 +2422,9 @@ public partial class Form1 : Form
 		});
 		sfDataGrid1.Columns.Add(new GridTextColumn
 		{
-			MappingName = "Step",
+			MappingName = "StepDisplay",
 			HeaderText = "단계",
-			Width = 46
+			Width = 108
 		});
 		sfDataGrid1.Columns.Add(new GridTextColumn
 		{
@@ -2715,6 +2720,32 @@ public partial class Form1 : Form
 	}
 
 	/// <summary>Records an outgoing bet as a pending row at the top of the grid.</summary>
+	/// <summary>
+	/// 진행 그리드 "단계" 칸 표기. 매트릭스 전략은 "행-열", 그 외 일직선 전략(업치기·마틴 등)은 "회차-단계"(예: 102-2).
+	/// 회차 정보가 없으면 단계 숫자만.
+	/// </summary>
+	private static string FormatStepDisplay(int cycleIndex, int step, int matrixRow, int matrixCol, decimal startMultiplier, bool isUpchigi)
+	{
+		// 매트릭스: 행-열
+		if (matrixRow > 0 && matrixCol > 0)
+		{
+			return $"{matrixRow}-{matrixCol}";
+		}
+		// 업치기: "회차-단계" (회차=누적 미당첨 기준 시도번호, 미당첨마다 +1 / 배수상승 때 1로 리셋 / 합산수익 때 유지).
+		//         시작금액 배수가 올라가 있으면 "×N" 꼬리표.
+		if (isUpchigi)
+		{
+			string text = $"{Math.Max(1, cycleIndex)}-{step}";
+			if (startMultiplier > 1m)
+			{
+				text += $" ×{startMultiplier:0.##}";
+			}
+			return text;
+		}
+		// 그 외 전략: 단계 숫자만
+		return step.ToString();
+	}
+
 	private void AddBetHistoryRow(AutoBettingExecutedEventArgs e, decimal amount)
 	{
 		BetHistoryRow row = new BetHistoryRow
@@ -2723,6 +2754,8 @@ public partial class Form1 : Form
 			GameId = e.GameId,
 			RoomName = GetTableDisplayName(e.TableId),
 			Step = e.Step,
+			StepDisplay = FormatStepDisplay(e.CycleIndex, e.Step, e.MatrixRow, e.MatrixCol, e.StartMultiplier,
+				_autoBettingService.Context.SelectedBetAmountType == 15),
 			BetType = BetTypeLabel(e.BetType),
 			BetAmount = amount,
 			Status = (e.IsSuccess ? "베팅중" : "실패")
@@ -3401,6 +3434,8 @@ public partial class Form1 : Form
 		context.IsPeakBalanceResetEnabled = after.PeakReset;
 		context.IsIgnorePendingBetEnabled = after.IgnorePendingBet;
 		context.IsVirtualMode = after.VirtualBet;
+		context.PerSiteLimit = after.PerSiteLimit;
+		context.SplitThreshold = after.SplitThreshold;
 		UpdateStepResetSetting();
 		UpdateVirtualBadge();
 		if (before.RoomGate != after.RoomGate)
@@ -3426,6 +3461,8 @@ public partial class Form1 : Form
 		UiPreferenceService.SetBool(_currentUserId, "stepAlarmEnabled", o.StepAlarm);
 		UiPreferenceService.SetInt(_currentUserId, "stepAlarmIndex", o.StepAlarmIndex);
 		UiPreferenceService.SetInt(_currentUserId, "betSplitCount", o.SplitCount);
+		UiPreferenceService.SetInt(_currentUserId, "perSiteLimit", (int)o.PerSiteLimit);
+		UiPreferenceService.SetInt(_currentUserId, "splitThreshold", (int)o.SplitThreshold);
 	}
 
 	private void LoadSavedOptions()
@@ -3442,13 +3479,17 @@ public partial class Form1 : Form
 			ShoeControlIndex = ClampIndex(UiPreferenceService.GetInt(_currentUserId, "shoeControlIndex"), ShoeControlThresholds.Length),
 			StepAlarm = UiPreferenceService.GetBool(_currentUserId, "stepAlarmEnabled"),
 			StepAlarmIndex = ClampIndex(UiPreferenceService.GetInt(_currentUserId, "stepAlarmIndex"), _alarmStepItems.Count),
-			SplitCount = Math.Max(1, UiPreferenceService.GetInt(_currentUserId, "betSplitCount", 1))
+			SplitCount = Math.Max(1, UiPreferenceService.GetInt(_currentUserId, "betSplitCount", 1)),
+			PerSiteLimit = UiPreferenceService.GetInt(_currentUserId, "perSiteLimit", 5000000),
+			SplitThreshold = UiPreferenceService.GetInt(_currentUserId, "splitThreshold", 40000)
 		};
 		AutoBettingContext context = _autoBettingService.Context;
 		context.IsPeakBalanceResetEnabled = _options.PeakReset;
 		context.IsIgnorePendingBetEnabled = _options.IgnorePendingBet;
 		context.IsVirtualMode = _options.VirtualBet;
 		context.IsRoomGateEnabled = _options.RoomGate;
+		context.PerSiteLimit = _options.PerSiteLimit;
+		context.SplitThreshold = _options.SplitThreshold;
 		_splitCount = _options.SplitCount;
 		UpdateStepResetSetting();
 		UpdateVirtualBadge();
@@ -4356,6 +4397,8 @@ public partial class Form1 : Form
 			BackColor = Color.FromArgb(18, 18, 38)
 		};
 		picRoad.Paint += PicRoad_Paint;
+		// 폭이 바뀌면 최신 열 오프셋이 달라지므로 리사이즈 때 다시 그린다.
+		picRoad.Resize += delegate { picRoad.Invalidate(); };
 		panel.Controls.Add(picRoad);
 		ApplyRoomVisual(panel, ppTableId);
 		return panel;
@@ -4594,6 +4637,13 @@ public partial class Form1 : Form
 
 	private static void DrawBigRoad(Graphics g, List<GameResult> results, int width, int height)
 	{
+		const int cell = 18;
+		g.SmoothingMode = SmoothingMode.AntiAlias;
+
+		// ---- 1패스: 각 결과의 열/행을 먼저 계산한다(그리기 전). 열이 picRoad 너비를 넘어도
+		//      최신(오른쪽) 열이 항상 보이도록 가로 오프셋을 먼저 구하기 위함 — 실제 카지노 빅로드처럼 최근 열 우선.
+		List<(int col, int row, Color color, bool pp, bool bp)> cells = new List<(int, int, Color, bool, bool)>();
+		List<(int col, int row)> ties = new List<(int, int)>();
 		HashSet<(int, int)> occupied = new HashSet<(int, int)>();
 		int col = 0;
 		int row = 0;
@@ -4603,17 +4653,13 @@ public partial class Form1 : Form
 		int lastDrawnCol = 0;
 		int lastDrawnRow = 0;
 		bool hasDrawn = false;
-		g.SmoothingMode = SmoothingMode.AntiAlias;
 		foreach (GameResult result in results)
 		{
 			if (result.Winner == "Tie")
 			{
 				if (hasDrawn)
 				{
-					int tieX = 2 + lastDrawnCol * 18 + 9;
-					int tieY = 2 + lastDrawnRow * 18 + 9;
-					using SolidBrush tieBrush = new SolidBrush(Color.LimeGreen);
-					g.FillEllipse(tieBrush, tieX - 3, tieY - 3, 6, 6);
+					ties.Add((lastDrawnCol, lastDrawnRow));
 				}
 				continue;
 			}
@@ -4652,25 +4698,50 @@ public partial class Form1 : Form
 			lastDrawnCol = col;
 			lastDrawnRow = row;
 			hasDrawn = true;
-			int x = 2 + col * 18;
-			int y = 2 + row * 18;
 			string winner = result.Winner;
 			Color color = ((winner == "Player") ? Color.DodgerBlue : ((!(winner == "Banker")) ? Color.Gray : Color.Crimson));
-			using (SolidBrush brush = new SolidBrush(color))
+			cells.Add((col, row, color, result.PlayerPair, result.BankerPair));
+			prevWinner = result.Winner;
+		}
+
+		// ---- 최신 열 우선 가로 오프셋: 총 열 수가 보이는 열 수를 넘으면, 넘친 만큼 왼쪽으로 밀어
+		//      마지막 열들이 오른쪽 끝에 보이게 한다(넘치지 않으면 0 → 기존과 동일하게 왼쪽부터 표시).
+		int maxCol = 0;
+		foreach (var c in cells)
+		{
+			if (c.col > maxCol) { maxCol = c.col; }
+		}
+		int visibleCols = Math.Max(1, (width - 2) / cell);
+		int xOffset = ((maxCol + 1) > visibleCols) ? (-((maxCol + 1 - visibleCols) * cell)) : 0;
+
+		// ---- 2패스: 실제 그리기(오프셋 적용, 화면 밖은 건너뜀) ----
+		foreach (var c in cells)
+		{
+			int x = 2 + c.col * cell + xOffset;
+			int y = 2 + c.row * cell;
+			if (x + cell <= 0 || x >= width) { continue; }
+			using (SolidBrush brush = new SolidBrush(c.color))
 			{
 				g.FillEllipse(brush, x + 1, y + 1, 16, 16);
 			}
-			if (result.PlayerPair)
+			if (c.pp)
 			{
 				using SolidBrush pairBrush = new SolidBrush(Color.Blue);
 				g.FillEllipse(pairBrush, x, y, 5, 5);
 			}
-			if (result.BankerPair)
+			if (c.bp)
 			{
 				using SolidBrush pairBrush2 = new SolidBrush(Color.Red);
-				g.FillEllipse(pairBrush2, x + 18 - 6, y + 18 - 6, 5, 5);
+				g.FillEllipse(pairBrush2, x + cell - 6, y + cell - 6, 5, 5);
 			}
-			prevWinner = result.Winner;
+		}
+		foreach (var t in ties)
+		{
+			int tieX = 2 + t.col * cell + 9 + xOffset;
+			int tieY = 2 + t.row * cell + 9;
+			if (tieX < 0 || tieX >= width) { continue; }
+			using SolidBrush tieBrush = new SolidBrush(Color.LimeGreen);
+			g.FillEllipse(tieBrush, tieX - 3, tieY - 3, 6, 6);
 		}
 	}
 

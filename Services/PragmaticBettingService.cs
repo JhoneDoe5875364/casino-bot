@@ -496,8 +496,8 @@ public class PragmaticBettingService
 								FileLogger.Log("[PpBetting] 비동기 후속 오류: " + ex2.Message, "Warning", "Betting");
 							}
 						});
-						FileLogger.Log("[PpBetting] PP 서버 확인 미수신(마감까지 대기 후) → 미접수=실패 처리 (로그만, 어디에도 미반영)", "Warning", "Betting");
-						return BetResult.Fail("PP 서버 확인 미수신 — 미접수로 처리(이력·회계·단계 미반영)");
+						FileLogger.Log("[PpBetting] PP 서버 확인 미수신(마감까지 대기 후) → 미접수=실패 처리 (로그만, 어디에도 미반영) — win/결과 증거 오면 사후 보정", "Warning", "Betting");
+						return BetResult.FailTimeoutUnconfirmed("PP 서버 확인 미수신 — 미접수로 처리(이력·회계·단계 미반영)");
 					}
 					if (ppResult.Value)
 					{

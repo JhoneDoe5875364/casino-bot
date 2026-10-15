@@ -56,6 +56,20 @@ public class RoomBettingState
 
 	public bool IsLateConfirmed { get; set; }
 
+	// ── 진행 표기용 '회차'(= 누적 미당첨 기준 시도 번호). 1부터 시작, 미당첨마다 +1, 배수상승 때 1로 리셋, 합산수익 리셋 때는 유지.
+	//    당첨·타이·완주로는 올리지 않는다. 진행 그리드에 "회차-단계"(예: 10-2)로 표시.
+	public int CycleIndex { get; set; } = 1;
+
+	// ── 2차 판정(사후 접수 보정)용: 전송했으나 확인 미수신으로 '미접수'된 베팅을 기억해 둔다.
+	//    같은 gameId 의 win/결과(접수 증거)가 오면 이 정보로 승격해 정상 판정한다.
+	public string? ProvisionalGameId { get; set; }
+
+	public decimal ProvisionalAmount { get; set; }
+
+	public string? ProvisionalTarget { get; set; }
+
+	public DateTime? ProvisionalTime { get; set; }
+
 	public bool IsShoeControlBlocked { get; set; }
 
 	public bool IsGateOpen { get; set; }
@@ -464,6 +478,12 @@ public class AutoBettingContext
 
 	public decimal UpchigiProfitResetThreshold { get; set; }
 
+	// 찢어베팅 '사이트당 한도금액'(원). 분배 시 한 사이트가 이 금액을 넘지 못한다. 0 이하면 기본 500만 사용.
+	public decimal PerSiteLimit { get; set; } = 5000000m;
+
+	// 찢어베팅 '시작 금액'(원). 베팅금이 이 값 이상일 때만 분할, 미만이면 1사이트 단독. 0 이하면 기본 4만 사용.
+	public decimal SplitThreshold { get; set; } = 40000m;
+
 	// 누적실패(미당첨 횟수) 임계 — 한 방의 누적 미당첨이 이 값에 도달하면 그 방의 시작금액 배수를 올린다. 0=미사용.
 	public int UpchigiFailEscalateThreshold { get; set; }
 
@@ -635,6 +655,15 @@ public class AutoBettingExecutedEventArgs : EventArgs
 
 	public int MatrixCol { get; set; }
 
+	/// <summary>진행 표기용 '시도 회차'(1단 climb 을 새로 시작할 때마다 +1). 일직선 전략의 "회차-단계" 앞 번호.</summary>
+	public int CycleIndex { get; set; }
+
+	/// <summary>업치기 시작금액 배수(누적실패 상승 레벨). 1 초과면 진행 표기에 "×N" 꼬리표로 보인다.</summary>
+	public decimal StartMultiplier { get; set; } = 1m;
+
+	/// <summary>업치기 '누적 미당첨 수'(이 배수 레벨에서). 진행 표기에 "(미당첨/임계)"로 붙여 임계 도달을 눈으로 확인.</summary>
+	public int FailAccum { get; set; }
+
 	public string? SiteSplitRemark { get; set; }
 }
 public class AutoBettingResultEventArgs : EventArgs
@@ -729,6 +758,12 @@ public class BetResult
 
 	public bool IsUnconfirmed { get; set; }
 
+	/// <summary>
+	/// 전송은 했지만 확인 메시지를 끝내 못 받아 '미접수=실패'로 처리된 경우(명시적 거절이 아님).
+	/// 이 경우에만 2차 판정(win/결과 증거로 사후 접수 보정)의 대상이 된다. 거절(반려)은 false.
+	/// </summary>
+	public bool IsTimeoutUnconfirmed { get; set; }
+
 	public string? ErrorMessage { get; set; }
 
 	public string? SentMessage { get; set; }
@@ -765,6 +800,19 @@ public class BetResult
 		return new BetResult
 		{
 			IsSuccess = false,
+			ErrorMessage = error
+		};
+	}
+
+	/// <summary>
+	/// 전송은 됐으나 확인 메시지 미수신으로 미접수 처리된 실패. 2차 판정(사후 접수 보정) 대상.
+	/// </summary>
+	public static BetResult FailTimeoutUnconfirmed(string error)
+	{
+		return new BetResult
+		{
+			IsSuccess = false,
+			IsTimeoutUnconfirmed = true,
 			ErrorMessage = error
 		};
 	}
