@@ -1623,9 +1623,11 @@ public class PragmaticAutoBettingService
 		bool isDoubleUpRound = IsHongKongDoubleUpPending(tableId, roomState) && (!IsSecondLogic | isSecondLogicActiveRoom);
 		// 슈 교체 직후 히스토리가 비어도, 서식 없이 직전 타겟으로 베팅하는 '줄타기/업치기 연속' 상황이면 그 한 라운드도 진행한다.
 		// (예전엔 히스토리가 비면 무조건 스킵해 슈가 바뀌면 줄타기가 한 판 쉬었다 — 그 결함 수정)
+		// [업치기 전용] 새 슈라 빅로드가 완전히 비면(Count==0) 단계와 무관하게 직전 방향으로 '첫판 이어걸기'를 허용한다.
+		// → 슈가 바뀌어도 업치기가 끊기지 않고 새 슈 첫판부터 이어서 진행한다. (빅로드가 쌓이면 평소대로 서식 로직 재개)
 		bool ridesWithoutFormat = ridingTarget != null || isDoubleUpRound
 			|| (Context.SelectedBetAmountType == 15 && !string.IsNullOrEmpty(roomState.LastBetType)
-				&& (roomState.IsUpchigiFlatPhase || roomState.CurrentStep > 1))
+				&& (roomState.IsUpchigiFlatPhase || roomState.CurrentStep > 1 || historyCopy.Count == 0))
 			|| (Context.IsPbCrossEnabled && !string.IsNullOrEmpty(roomState.PbCrossTarget));
 		if (historyCopy.Count == 0 && !ridesWithoutFormat)
 		{
@@ -1691,9 +1693,10 @@ public class PragmaticAutoBettingService
 		}
 		if (!isDoubleUpForced && !isRidingForced && !isPbCrossForced
 			&& Context.SelectedBetAmountType == 15 && !string.IsNullOrEmpty(roomState.LastBetType)
-			&& (roomState.IsUpchigiFlatPhase || roomState.CurrentStep > 1))
+			&& (roomState.IsUpchigiFlatPhase || roomState.CurrentStep > 1 || historyCopy.Count == 0))
 		{
-			// 업치기 자동 연속: 당첨로 2단계 이상 진입했으면 서식 재매칭 없이 직전 타겟으로 자동 베팅(대상 동일).
+			// 업치기 자동 연속: 당첨로 2단계 이상 진입(또는 일정베팅)이면 서식 재매칭 없이 직전 타겟으로 자동 베팅(대상 동일).
+			// 추가: 새 슈라 빅로드가 비면(Count==0) 1단계에서도 직전 방향으로 '첫판 이어걸기'(슈 경계에서 안 끊기게).
 			matchedPattern = new BettingPattern
 			{
 				Number = 0,
@@ -1704,7 +1707,9 @@ public class PragmaticAutoBettingService
 			};
 			FileLogger.Log(roomState.IsUpchigiFlatPhase
 				? $"[업치기] {tableId}: 서식 매칭 우회 - 일정베팅 자동 연속, 타겟={roomState.LastBetType}"
-				: $"[업치기] {tableId}: 서식 매칭 우회 - 자동 업치기 {roomState.CurrentStep}단계, 타겟={roomState.LastBetType}");
+				: (historyCopy.Count == 0 && roomState.CurrentStep <= 1)
+					? $"[업치기] {tableId}: 서식 매칭 우회 - 슈 교체 첫판 이어걸기(빅로드 비어있음), 타겟={roomState.LastBetType}"
+					: $"[업치기] {tableId}: 서식 매칭 우회 - 자동 업치기 {roomState.CurrentStep}단계, 타겟={roomState.LastBetType}");
 		}
 		else if (!isDoubleUpForced && !isRidingForced && !isPbCrossForced)
 		{

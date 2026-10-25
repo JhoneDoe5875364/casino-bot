@@ -264,6 +264,14 @@ public partial class Form1 : Form
 
 	private async void Form1_Load(object? sender, EventArgs e)
 	{
+		// 메인 폼을 '초기 기동 크기'로 고정한다 — 마우스로 더 크게/작게 늘릴 수 없게 한다.
+		//  · 너비 = 최소너비(모든 내용이 들어가는 폭 = 기동 폭)  · 높이 = 초기 기동 높이
+		//  Min=Max 를 같게 두면 테두리 스타일은 유지한 채 크기 조절만 막힌다. 최대화 버튼도 끈다.
+		//  (축소버젼/최소화 복원은 WindowState 기반이라 영향 없음)
+		Size startupSize = this.Size;
+		this.MinimumSize = startupSize;
+		this.MaximumSize = startupSize;
+		this.MaximizeBox = false;
 		InitializeBetHistoryGrid();
 		// room panels follow the window width instead of scrolling sideways
 		panelPlayRoomContainer.AutoScroll = false;
